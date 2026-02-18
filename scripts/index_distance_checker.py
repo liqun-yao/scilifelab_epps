@@ -496,5 +496,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     lims = Lims(BASEURI, USERNAME, PASSWORD)
-    lims.check_version()
     main(lims, args.pid, args.auto)
