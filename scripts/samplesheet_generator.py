@@ -660,21 +660,16 @@ def _parse_and_add_labels(sample_idxs, labels):
         if idxs:
             sample_idxs.add((idxs[0], ""))
         else:
-            # 2. Try parentheses extraction (Your new preferred method)
-            match = re.search(r'\(([\w-]+)\)', reagent_label)
-            if match:
-                # Split into tuple if it's a dual index (A-B)
-                seq = match.group(1)
-                if '-' in seq:
-                    sample_idxs.add(tuple(seq.split('-')))
-                else:
-                    sample_idxs.add((seq, ""))
-            else:
-                # 3. Fallback to generic IDX_PAT or LIMS API
+            try:
+                idxs = IDX_PAT.findall(reagent_label_name)[0]
+                sample_idxs.add(idxs)
+            except IndexError:
                 try:
-                    idxs = IDX_PAT.findall(reagent_label_name)[0]
+                    # we only have the reagent label name.
+                    rt = lims.get_reagent_types(name=reagent_label_name)[0]
+                    idxs = IDX_PAT.findall(rt.sequence)[0]
                     sample_idxs.add(idxs)
-                except IndexError:
+                except:
                     sample_idxs.add(("NoIndex", ""))
 
 def _recurse_upstream(sample_idxs, sample, art):
