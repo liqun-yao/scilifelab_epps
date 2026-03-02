@@ -620,42 +620,67 @@ def gen_Nextseq_lane_data(pro):
 
     return (content, data)
 
-
 def find_barcode(sample_idxs, sample, process):
-    # print "trying to find {} barcode in {}".format(sample.name, process.name)
+    # Iterate through inputs to find the artifact containing this sample
     for art in process.all_inputs():
         if sample in art.samples:
+            
+            # CASE 1: Single sample artifact with labels (The original "Sweet Spot")
             if len(art.samples) == 1 and art.reagent_labels:
-                # In rare cases we have a pool containing the same sample with different labels
-                for reagent_label in art.reagent_labels:
-                    reagent_label_name = reagent_label.upper().replace(" ", "")
-                    idxs = (
-                        TENX_SINGLE_PAT.findall(reagent_label_name)
-                        or TENX_DUAL_PAT.findall(reagent_label_name)
-                        or SMARTSEQ_PAT.findall(reagent_label_name)
-                    )
-                    if idxs:
-                        # Put in tuple with empty string as second index to
-                        # match expected type:
-                        sample_idxs.add((idxs[0], ""))
-                    else:
-                        try:
-                            idxs = IDX_PAT.findall(reagent_label_name)[0]
-                            sample_idxs.add(idxs)
-                        except IndexError:
-                            try:
-                                # we only have the reagent label name.
-                                rt = lims.get_reagent_types(name=reagent_label_name)[0]
-                                idxs = IDX_PAT.findall(rt.sequence)[0]
-                                sample_idxs.add(idxs)
-                            except:
-                                sample_idxs.add(("NoIndex", ""))
+                _parse_and_add_labels(sample_idxs, art.reagent_labels)
+            
+            # CASE 2: Pooled artifact (The "Purification/Merge" fix)
+            # Check if this specific artifact has labels assigned to the samples
+            elif len(art.reagent_labels) == len(art.samples):
+                try:
+                    # Find the index of our specific sample in this pool
+                    sample_idx = art.samples.index(sample)
+                    specific_label = [list(art.reagent_labels)[sample_idx]]
+                    _parse_and_add_labels(sample_idxs, specific_label)
+                except (ValueError, IndexError):
+                    # If mapping fails, try going upstream
+                    _recurse_upstream(sample_idxs, sample, art)
+            
+            # CASE 3: No labels here or mismatched counts, go upstream
             else:
-                if art == sample.artifact or not art.parent_process:
-                    pass
-                else:
-                    find_barcode(sample_idxs, sample, art.parent_process)
+                _recurse_upstream(sample_idxs, sample, art)
 
+def _parse_and_add_labels(sample_idxs, labels):
+    """Helper to handle the regex logic from your original script."""
+    for reagent_label in labels:
+        reagent_label_name = reagent_label.upper().replace(" ", "")
+        
+        # 1. Try patterns (10X, SmartSeq)
+        idxs = (
+            TENX_SINGLE_PAT.findall(reagent_label_name)
+            or TENX_DUAL_PAT.findall(reagent_label_name)
+            or SMARTSEQ_PAT.findall(reagent_label_name)
+        )
+        
+        if idxs:
+            sample_idxs.add((idxs[0], ""))
+        else:
+            # 2. Try parentheses extraction (Your new preferred method)
+            match = re.search(r'\(([\w-]+)\)', reagent_label)
+            if match:
+                # Split into tuple if it's a dual index (A-B)
+                seq = match.group(1)
+                if '-' in seq:
+                    sample_idxs.add(tuple(seq.split('-')))
+                else:
+                    sample_idxs.add((seq, ""))
+            else:
+                # 3. Fallback to generic IDX_PAT or LIMS API
+                try:
+                    idxs = IDX_PAT.findall(reagent_label_name)[0]
+                    sample_idxs.add(idxs)
+                except IndexError:
+                    sample_idxs.add(("NoIndex", ""))
+
+def _recurse_upstream(sample_idxs, sample, art):
+    """Helper to handle recursion."""
+    if art.parent_process and art != sample.artifact:
+        find_barcode(sample_idxs, sample, art.parent_process)
 
 def test():
     log = []
