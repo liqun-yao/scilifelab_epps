@@ -162,7 +162,17 @@ def generate_MinKNOW_samplesheet(process):
 
     errors = []
 
-    lims_kit = process.udf["ONT prep kit"].replace(".", "-")
+    # Extract the kit string and standardize dots to hyphens
+    raw_kit_string = process.udf["ONT prep kit"].replace(".", "-")
+
+    # Split by whitespace to handle cases like "SQK-LSK114 SQK-NBD114-24"
+    kit_parts = raw_kit_string.split()
+
+    # MinKNOW samplesheets prioritize the expansion/barcoding kit
+    # We take the last part of the string if multiple kits are listed
+    lims_kit = kit_parts[-1] if kit_parts else ""
+
+    logging.info(f"Selected kit for samplesheet: {lims_kit}")
 
     ont_libraries = [art for art in process.all_outputs() if art.type == "Analyte"]
     ont_libraries.sort(key=lambda art: art.id)
@@ -211,7 +221,7 @@ def generate_MinKNOW_samplesheet(process):
                 )
 
             # 1) Barcodes implied from kit selection, kit ends with '24' or '96'
-            if lims_kit[-2:] in ["24", "96","14"]:
+            if lims_kit[-2:] in ["24", "96",]:
                 # Assert barcodes are found within library
                 assert ont_barcodes, (
                     f"ONT barcodes are implied from kit selection, but no ONT barcodes were found within library {ont_library.name}"
