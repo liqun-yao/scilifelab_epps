@@ -16,18 +16,25 @@ def main(lims, args):
     ar_driver = {}
     valid_cols = set()
     for output in currentStep.all_outputs():
+        # 1. Catch the placeholder
         if output.name == "Driver File":
             driver_file_out = output
-            print("Found the output file placeholder.")
-        else:
-            if output.location[1]:
-                print(f"Found sample: {output.name} at {output.location[1]}")
-                location_ar = output.location[1].split(":")
-                valid_cols.add(location_ar[0])
-                ar_driver[output.location[1].replace(":", "")] = output.name
+            continue
+            
+        # 2. Try to get the location
+        try:
+            location = output.location[1]
+        except (AttributeError, IndexError):
+            location = None
 
-    print(f"Rows found: {valid_cols}")
-    print(f"Total entries in driver list before writing: {len(driver)}")
+        # 3. Process if it's a sample/pool with a position
+        if location:
+            well = location.replace(":", "")
+            row_letter = location.split(":")[0]
+            
+            valid_cols.add(row_letter)
+            ar_driver[well] = output.name
+            print(f"Successfully added {output.name} at {well}")
 
     col_idx = -1
     for column in sorted(list(valid_cols)):
