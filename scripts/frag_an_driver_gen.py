@@ -5,78 +5,80 @@ from genologics.config import BASEURI, PASSWORD, USERNAME
 from genologics.entities import Process
 from genologics.lims import Lims
 import sys
-
-DESC = """EPP used to create csv files to drive the fragment analyzer"""
+import traceback
 
 def main(lims, args):
     currentStep = Process(lims, id=args.pid)
     driver_file_out = None
-    driver = []
-    ar_driver = {}
-    valid_cols = set()
-
-    # --- 1. DATA COLLECTION ---
-    for output in currentStep.all_outputs():
-        # Check for the file placeholder
-        if output.name == "Driver File":
-            driver_file_out = output
-        
-        # Check for Samples/Pools (Analytes)
-        elif output.type == "Analyte" and output.location[1]:
-            location = output.location[1]
-            row_letter = location.split(":")[0]
-            well_key = location.replace(":", "")
-            
-            valid_cols.add(row_letter)
-            # FIX: Using output.name ensures Pools show their Pool Name
-            ar_driver[well_key] = output.name
-            # Debug print to help you see it in the terminal
-            print(f"DEBUG: Found {output.name} at {well_key}")
-
-    # --- 2. VALIDATION ---
-    if not driver_file_out:
-        print("ERROR: Could not find an output artifact named 'Driver File'. Check LIMS configuration.")
-        sys.exit(1)
+    log_file_out = None
     
-    if not valid_cols:
-        print("ERROR: No samples with valid plate locations were found.")
-        # We still want to upload something to avoid a zero-byte hang
-        with open("frag_an_driver.csv", "w") as f:
-            f.write("0,No_Samples_Found,Empty\n")
-        lims.upload_new_file(driver_file_out, "frag_an_driver.csv")
-        return
-
-    # --- 3. LAYOUT GENERATION ---
-    col_idx = -1
-    for column in sorted(list(valid_cols)):
-        col_idx += 1
-        for i in range(1, 13):
-            location = f"{column}{i}"
-            # Check dictionary for sample, default to ladder for col 12, else empty
-            sample_name = ar_driver.get(location, "ladder" if i == 12 else "")
+    # Standard log file name
+    log_filename = "epp_execution_log.txt"
+    
+    # Start capturing all print statements and errors to a file
+    with open(log_filename, "w") as log_f:
+        try:
+            log_f.write(f"Script started for process {args.pid}\n")
             
-            driver.append(
-                (
-                    col_idx * 12 + i,
-                    location,
-                    sample_name,
-                )
-            )
+            # --- 1. FIND FILE SLOTS ---
+            for output in currentStep.all_outputs():
+                if output.name == "Driver File":
+                    driver_file_out = output
+                elif output.name == "EPP Log": # Make sure this matches LIMS name!
+                    log_file_out = output
 
-    # --- 4. FILE WRITING AND UPLOAD ---
-    filename = "frag_an_driver.csv"
-    with open(filename, "w") as f:
-        for line in driver:
-            f.write(f"{line[0]},{line[1]},{line[2]}\n")
+            # --- 2. DATA COLLECTION ---
+            # We check both Inputs and Outputs to be 100% safe
+            artifacts = currentStep.all_inputs() + currentStep.all_outputs()
+            ar_driver = {}
+            valid_cols = set()
 
-    lims.upload_new_file(driver_file_out, filename)
-    print(f"DONE: Successfully uploaded driver file with {len(driver)} lines.")
+            for art in artifacts:
+                if art == driver_file_out or art == log_file_out:
+                    continue
+                
+                # Check for location. location[1] is the well (e.g., A:1)
+                if art.location and art.location[1]:
+                    loc = art.location[1]
+                    well = loc.replace(":", "")
+                    row = loc.split(":")[0]
+                    
+                    if well not in ar_driver:
+                        valid_cols.add(row)
+                        ar_driver[well] = art.name
+                        log_f.write(f"INFO: Mapped {art.name} to {well}\n")
 
-if __name__ == "__main__":
-    parser = ArgumentParser(description=DESC)
-    parser.add_argument("--pid", help="Lims id for current Process")
-    args = parser.parse_args()
+            # --- 3. LAYOUT GENERATION ---
+            if not valid_cols:
+                log_f.write("ERROR: No samples found with valid plate locations.\n")
+            else:
+                driver = []
+                col_idx = -1
+                for column in sorted(list(valid_cols)):
+                    col_idx += 1
+                    for i in range(1, 13):
+                        location = f"{column}{i}"
+                        name = ar_driver.get(location, "ladder" if i == 12 else "")
+                        driver.append((col_idx * 12 + i, location, name))
 
-    lims = Lims(BASEURI, USERNAME, PASSWORD)
-    lims.check_version()
-    main(lims, args)
+                # --- 4. FILE WRITING ---
+                csv_filename = "frag_an_driver.csv"
+                with open(csv_filename, "w") as f:
+                    for line in driver:
+                        f.write(f"{line[0]},{line[1]},{line[2]}\n")
+                
+                # Upload the driver file
+                if driver_file_out:
+                    lims.upload_new_file(driver_file_out, csv_filename)
+                    log_f.write("SUCCESS: Driver file uploaded.\n")
+
+        except Exception as e:
+            # If anything crashes, write the traceback to the log file
+            log_f.write("\n--- SCRIPT CRASHED ---\n")
+            log_f.write(traceback.format_exc())
+            print(f"Script failed. Check {log_filename} for details.")
+
+    # --- 5. FINAL LOG UPLOAD ---
+    # This happens outside the try/except to ensure it always uploads
+    if log_file_out:
+        lims.upload_new_file(log_file_out, log_filename)
