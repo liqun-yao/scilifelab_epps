@@ -18,13 +18,16 @@ def main(lims, args):
     for output in currentStep.all_outputs():
         if output.name == "Driver File":
             driver_file_out = output
+            print("Found the output file placeholder.")
         else:
-            if output.type == "Analyte" and output.location[1]:
+            if output.location[1]:
+                print(f"Found sample: {output.name} at {output.location[1]}")
                 location_ar = output.location[1].split(":")
                 valid_cols.add(location_ar[0])
-                # idx = (ord(location_ar[0])-65)*12 + int(location_ar[1])-1
-                well_key = output.location[1].replace(":", "")
-                ar_driver[well_key] = output.name
+                ar_driver[output.location[1].replace(":", "")] = output.name
+
+    print(f"Rows found: {valid_cols}")
+    print(f"Total entries in driver list before writing: {len(driver)}")
 
     col_idx = -1
     for column in sorted(list(valid_cols)):
