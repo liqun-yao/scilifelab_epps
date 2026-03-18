@@ -644,5 +644,6 @@ for lims_kit, labels in lims_kits2labels.items():
             f"Barcode {label_dict['name']} sequence is mismatched between LIMS and ONT docs."
         )
         # FIX: Map both the full LIMS label and the raw DNA sequence to the data
+        if label_dict["seq"] not in ont_label2dict:
+            ont_label2dict[label_dict["seq"]] = label_dict
         ont_label2dict[label] = label_dict
-        ont_label2dict[label_dict["seq"]] = label_dict
