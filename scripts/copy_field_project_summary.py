@@ -37,6 +37,37 @@ from scilifelab_epps.epp import EppLogger
 NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
 
 
+def build_artifact_targets(artifacts, aggregate):
+    targets = []
+    for artifact in artifacts:
+        if not artifact.samples:
+            continue
+
+        sample = artifact.samples[0]
+        if not NGISAMPLE_PAT.search(sample.name):
+            continue
+
+        dest_obj = sample.artifact if aggregate else sample
+        targets.append((artifact, dest_obj))
+    return targets
+
+
+def slice_chunk(items, chunk_size, chunk_index):
+    if chunk_size <= 0:
+        return items
+    start = chunk_index * chunk_size
+    end = start + chunk_size
+    return items[start:end]
+
+
+def build_projects(artifacts):
+    projects = OrderedDict()
+    for artifact in artifacts:
+        for sample in artifact.samples:
+            if sample.project:
+                projects[sample.project.id] = sample.project
+    return list(projects.values())
+
 
 def queue_copy(source_obj, dest_obj, source_udf, dest_udf, pending_updates):
     """Queue a copy and defer saving so each destination is written once."""
@@ -58,7 +89,7 @@ def queue_copy(source_obj, dest_obj, source_udf, dest_udf, pending_updates):
 def flush_updates(pending_updates, target_name, changelog_f):
     saved = 0
     failed = 0
-    for pending_update in pending_updates.values():
+    for idx, pending_update in enumerate(pending_updates.values(), start=1):
         dest_obj = pending_update["obj"]
         try:
             dest_obj.put()
@@ -70,6 +101,8 @@ def flush_updates(pending_updates, target_name, changelog_f):
             logging.error(
                 f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
             )
+        if idx % 250 == 0:
+            logging.info(f"Saved {idx} {target_name} objects so far")
     return saved, failed
 
 
@@ -77,6 +110,20 @@ def main(lims, args, epp_logger):
 
     process = Process(lims, id=args.pid)
     artifacts, _ = process.analytes()
+    artifact_targets = build_artifact_targets(artifacts, args.aggregate)
+    all_artifact_targets = len(artifact_targets)
+    artifact_targets = slice_chunk(
+        artifact_targets, args.art_chunk_size, args.art_chunk_index
+    )
+    projects = build_projects(artifacts) if args.proc_source_udf else []
+
+    logging.info(
+        "Artifact chunk selection: total=%s chunk_size=%s chunk_index=%s selected=%s",
+        all_artifact_targets,
+        args.art_chunk_size,
+        args.art_chunk_index,
+        len(artifact_targets),
+    )
 
     if args.status_changelog:
         epp_logger.prepend_old_log(args.status_changelog)
@@ -105,20 +152,7 @@ def main(lims, args, epp_logger):
             sys.exit(-1)
 
         for source_udf, dest_udf in zip(args.art_source_udf, args.art_dest_udf):
-
-            for artifact in artifacts:
-
-                if not artifact.samples:
-                    continue
-
-                sample = artifact.samples[0]
-
-                # Only NGI samples
-                if not NGISAMPLE_PAT.search(sample.name):
-                    continue
-
-                dest_obj = sample.artifact if args.aggregate else sample
-
+            for artifact, dest_obj in artifact_targets:
                 updated = queue_copy(
                     artifact, dest_obj,
                     source_udf, dest_udf,
@@ -152,18 +186,8 @@ def main(lims, args, epp_logger):
             logging.error("proc_source_udf and proc_dest_udf lists of arguments are uneven.")
             sys.exit(-1)
 
-        # Collect unique projects efficiently
-        projects = {
-            s.project
-            for a in artifacts
-            for s in a.samples
-            if s.project
-        }
-
         for source_udf, dest_udf in zip(args.proc_source_udf, args.proc_dest_udf):
-
             for project in projects:
-
                 updated = queue_copy(
                     process, project,
                     source_udf, dest_udf,
@@ -190,6 +214,10 @@ def main(lims, args, epp_logger):
     ############################################
 
     summary = (
+        f"Artifact chunk total: {all_artifact_targets} | "
+        f"Artifact chunk size: {args.art_chunk_size} | "
+        f"Artifact chunk index: {args.art_chunk_index} | "
+        f"Artifact chunk selected: {len(artifact_targets)} | "
         f"Artifact updates: {art_updates} | "
         f"Artifact skipped: {art_skipped} | "
         f"Artifact objects saved: {art_saved} | "
@@ -211,6 +239,8 @@ if __name__ == "__main__":
     parser.add_argument("--log")
     parser.add_argument("-c", "--status_changelog")
     parser.add_argument("--aggregate", action="store_true")
+    parser.add_argument("--art_chunk_size", type=int, default=0)
+    parser.add_argument("--art_chunk_index", type=int, default=0)
 
     # Artifact arguments
     parser.add_argument("--art_source_udf", nargs="*")
