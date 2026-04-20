@@ -22,11 +22,13 @@ the omission and continues with the remaining items without failing the entire
 automation.
 Written by Liqun Yao, Science for Life Laboratory, Stockholm, Sweden
 """
+import atexit
 import logging
 import re
 import sys
 from argparse import ArgumentParser
 from collections import OrderedDict
+from datetime import datetime
 
 from genologics.config import BASEURI, PASSWORD, USERNAME
 from genologics.entities import Process
@@ -35,6 +37,23 @@ from genologics.lims import Lims
 from scilifelab_epps.epp import EppLogger
 
 NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
+
+
+class ProgressTracker:
+    def __init__(self, path):
+        self.path = path
+        self.handle = open(path, "a")
+        self.write(f"Run started: {datetime.now().isoformat()}")
+        atexit.register(self.close)
+
+    def write(self, message):
+        self.handle.write(f"{datetime.now().isoformat()} {message}\n")
+        self.handle.flush()
+
+    def close(self):
+        if getattr(self, "handle", None) and not self.handle.closed:
+            self.write("Run finished")
+            self.handle.close()
 
 
 def build_artifact_targets(artifacts, aggregate):
@@ -86,7 +105,7 @@ def queue_copy(source_obj, dest_obj, source_udf, dest_udf, pending_updates):
     return True
 
 
-def flush_updates(pending_updates, target_name, changelog_f):
+def flush_updates(pending_updates, target_name, changelog_f, progress_tracker):
     saved = 0
     failed = 0
     for idx, pending_update in enumerate(pending_updates.values(), start=1):
@@ -101,21 +120,34 @@ def flush_updates(pending_updates, target_name, changelog_f):
             logging.error(
                 f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
             )
+            progress_tracker.write(
+                f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
+            )
         if idx % 250 == 0:
             logging.info(f"Saved {idx} {target_name} objects so far")
+            progress_tracker.write(f"Saved {idx} {target_name} objects so far")
     return saved, failed
 
 
 def main(lims, args, epp_logger):
-
+    progress_tracker = ProgressTracker(args.progress_log)
+    progress_message = f"Progress log: {progress_tracker.path}"
+    progress_tracker.write(progress_message)
+    print(progress_message, file=sys.stderr)
     process = Process(lims, id=args.pid)
+    progress_tracker.write(f"Loaded process {args.pid}")
     artifacts, _ = process.analytes()
+    progress_tracker.write(f"Fetched {len(artifacts)} analytes from process")
     artifact_targets = build_artifact_targets(artifacts, args.aggregate)
     all_artifact_targets = len(artifact_targets)
     artifact_targets = slice_chunk(
         artifact_targets, args.art_chunk_size, args.art_chunk_index
     )
     projects = build_projects(artifacts) if args.proc_source_udf else []
+    progress_tracker.write(
+        f"Artifact chunk selection total={all_artifact_targets} chunk_size={args.art_chunk_size} "
+        f"chunk_index={args.art_chunk_index} selected={len(artifact_targets)}"
+    )
 
     logging.info(
         "Artifact chunk selection: total=%s chunk_size=%s chunk_index=%s selected=%s",
@@ -125,7 +157,7 @@ def main(lims, args, epp_logger):
         len(artifact_targets),
     )
 
-    if args.status_changelog:
+    if args.status_changelog and not args.skip_status_changelog_prepend:
         epp_logger.prepend_old_log(args.status_changelog)
 
     ############################################
@@ -149,9 +181,13 @@ def main(lims, args, epp_logger):
             args.art_dest_udf = args.art_source_udf
         elif len(args.art_dest_udf) != len(args.art_source_udf):
             logging.error("art_source_udf and art_dest_udf lists of arguments are uneven.")
+            progress_tracker.write("Error: art_source_udf and art_dest_udf lists are uneven")
             sys.exit(-1)
 
         for source_udf, dest_udf in zip(args.art_source_udf, args.art_dest_udf):
+            progress_tracker.write(
+                f"Queueing artifact copy source_udf='{source_udf}' dest_udf='{dest_udf}'"
+            )
             for artifact, dest_obj in artifact_targets:
                 updated = queue_copy(
                     artifact, dest_obj,
@@ -165,7 +201,11 @@ def main(lims, args, epp_logger):
                     art_skipped += 1
 
         art_saved, art_failed = flush_updates(
-            art_pending_updates, "artifact destination", changelog_f
+            art_pending_updates, "artifact destination", changelog_f, progress_tracker
+        )
+        progress_tracker.write(
+            f"Artifact flush complete updates={art_updates} skipped={art_skipped} "
+            f"saved={art_saved} failed={art_failed}"
         )
 
     ############################################
@@ -178,15 +218,31 @@ def main(lims, args, epp_logger):
     proc_failed = 0
     proc_pending_updates = OrderedDict()
 
-    if args.proc_source_udf:
+    run_project_copy = bool(args.proc_source_udf)
+    if args.proc_only_first_chunk and args.art_chunk_size > 0 and args.art_chunk_index > 0:
+        run_project_copy = False
+        logging.info(
+            "Skipping process-to-project copy because --proc_only_first_chunk is set "
+            "and this is chunk %s",
+            args.art_chunk_index,
+        )
+        progress_tracker.write(
+            f"Skipping process-to-project copy for chunk {args.art_chunk_index}"
+        )
+
+    if run_project_copy:
 
         if not args.proc_dest_udf:
             args.proc_dest_udf = args.proc_source_udf
         elif len(args.proc_dest_udf) != len(args.proc_source_udf):
             logging.error("proc_source_udf and proc_dest_udf lists of arguments are uneven.")
+            progress_tracker.write("Error: proc_source_udf and proc_dest_udf lists are uneven")
             sys.exit(-1)
 
         for source_udf, dest_udf in zip(args.proc_source_udf, args.proc_dest_udf):
+            progress_tracker.write(
+                f"Queueing project copy source_udf='{source_udf}' dest_udf='{dest_udf}'"
+            )
             for project in projects:
                 updated = queue_copy(
                     process, project,
@@ -200,7 +256,11 @@ def main(lims, args, epp_logger):
                     proc_skipped += 1
 
         proc_saved, proc_failed = flush_updates(
-            proc_pending_updates, "project", changelog_f
+            proc_pending_updates, "project", changelog_f, progress_tracker
+        )
+        progress_tracker.write(
+            f"Project flush complete updates={proc_updates} skipped={proc_skipped} "
+            f"saved={proc_saved} failed={proc_failed}"
         )
 
     ############################################
@@ -228,7 +288,9 @@ def main(lims, args, epp_logger):
         f"Project save failures: {proc_failed}"
     )
 
+    progress_tracker.write(summary)
     print(summary, file=sys.stderr)
+    progress_tracker.close()
 
 
 if __name__ == "__main__":
@@ -241,6 +303,12 @@ if __name__ == "__main__":
     parser.add_argument("--aggregate", action="store_true")
     parser.add_argument("--art_chunk_size", type=int, default=0)
     parser.add_argument("--art_chunk_index", type=int, default=0)
+    parser.add_argument("--skip_status_changelog_prepend", action="store_true")
+    parser.add_argument("--proc_only_first_chunk", action="store_true")
+    parser.add_argument(
+        "--progress_log",
+        default=f"copy_field_project_summary_progress_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
+    )
 
     # Artifact arguments
     parser.add_argument("--art_source_udf", nargs="*")
