@@ -26,6 +26,7 @@ import logging
 import re
 import sys
 from argparse import ArgumentParser
+from collections import OrderedDict
 
 from genologics.config import BASEURI, PASSWORD, USERNAME
 from genologics.entities import Process
@@ -37,26 +38,39 @@ NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
 
 
 
-def safe_copy(source_obj, dest_obj, source_udf, dest_udf, changelog_f):
-    """Best-effort safe copy. Skips if missing or unchanged."""
+def queue_copy(source_obj, dest_obj, source_udf, dest_udf, pending_updates):
+    """Queue a copy and defer saving so each destination is written once."""
     if source_udf not in source_obj.udf:
-        logging.warning(
-            f"Source UDF '{source_udf}' missing on {source_obj}"
-        )
+        logging.warning(f"Source UDF '{source_udf}' missing on {source_obj}")
         return False
 
     value = source_obj.udf.get(source_udf)
 
     if dest_obj.udf.get(dest_udf) == value:
-        return False  # no update needed
+        return False
 
     dest_obj.udf[dest_udf] = value
-    dest_obj.put()
-
-    changelog_f.write(
-        f"Updated {dest_udf} on {dest_obj} from {source_udf}\n"
-    )
+    pending_update = pending_updates.setdefault(dest_obj.id, {"obj": dest_obj, "logs": []})
+    pending_update["logs"].append(f"Updated {dest_udf} on {dest_obj} from {source_udf}\n")
     return True
+
+
+def flush_updates(pending_updates, target_name, changelog_f):
+    saved = 0
+    failed = 0
+    for pending_update in pending_updates.values():
+        dest_obj = pending_update["obj"]
+        try:
+            dest_obj.put()
+            saved += 1
+            if changelog_f:
+                changelog_f.writelines(pending_update["logs"])
+        except Exception as e:
+            failed += 1
+            logging.error(
+                f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
+            )
+    return saved, failed
 
 
 def main(lims, args, epp_logger):
@@ -78,11 +92,17 @@ def main(lims, args, epp_logger):
 
     art_updates = 0
     art_skipped = 0
+    art_saved = 0
+    art_failed = 0
+    art_pending_updates = OrderedDict()
 
     if args.art_source_udf:
 
         if not args.art_dest_udf:
             args.art_dest_udf = args.art_source_udf
+        elif len(args.art_dest_udf) != len(args.art_source_udf):
+            logging.error("art_source_udf and art_dest_udf lists of arguments are uneven.")
+            sys.exit(-1)
 
         for source_udf, dest_udf in zip(args.art_source_udf, args.art_dest_udf):
 
@@ -99,10 +119,10 @@ def main(lims, args, epp_logger):
 
                 dest_obj = sample.artifact if args.aggregate else sample
 
-                updated = safe_copy(
+                updated = queue_copy(
                     artifact, dest_obj,
                     source_udf, dest_udf,
-                    changelog_f
+                    art_pending_updates,
                 )
 
                 if updated:
@@ -110,17 +130,27 @@ def main(lims, args, epp_logger):
                 else:
                     art_skipped += 1
 
+        art_saved, art_failed = flush_updates(
+            art_pending_updates, "artifact destination", changelog_f
+        )
+
     ############################################
     # PART 2 — Process ➜ Project
     ############################################
 
     proc_updates = 0
     proc_skipped = 0
+    proc_saved = 0
+    proc_failed = 0
+    proc_pending_updates = OrderedDict()
 
     if args.proc_source_udf:
 
         if not args.proc_dest_udf:
             args.proc_dest_udf = args.proc_source_udf
+        elif len(args.proc_dest_udf) != len(args.proc_source_udf):
+            logging.error("proc_source_udf and proc_dest_udf lists of arguments are uneven.")
+            sys.exit(-1)
 
         # Collect unique projects efficiently
         projects = {
@@ -134,16 +164,20 @@ def main(lims, args, epp_logger):
 
             for project in projects:
 
-                updated = safe_copy(
+                updated = queue_copy(
                     process, project,
                     source_udf, dest_udf,
-                    changelog_f
+                    proc_pending_updates,
                 )
 
                 if updated:
                     proc_updates += 1
                 else:
                     proc_skipped += 1
+
+        proc_saved, proc_failed = flush_updates(
+            proc_pending_updates, "project", changelog_f
+        )
 
     ############################################
     # Close changelog
@@ -158,8 +192,12 @@ def main(lims, args, epp_logger):
     summary = (
         f"Artifact updates: {art_updates} | "
         f"Artifact skipped: {art_skipped} | "
+        f"Artifact objects saved: {art_saved} | "
+        f"Artifact save failures: {art_failed} | "
         f"Project updates: {proc_updates} | "
-        f"Project skipped: {proc_skipped}"
+        f"Project skipped: {proc_skipped} | "
+        f"Project objects saved: {proc_saved} | "
+        f"Project save failures: {proc_failed}"
     )
 
     print(summary, file=sys.stderr)
