@@ -218,6 +218,31 @@ def my_distance(idx_a, idx_b):
     return diffs
 
 
+def parse_submitted_location(container_name):
+    parts = container_name.split("-")
+    submitted_container_name = parts[0] if parts else ""
+    if len(parts) < 3:
+        return submitted_container_name, ""
+
+    submitted_position = parts[2]
+    submitted_pool_well_row = re.findall("[a-zA-Z]+", submitted_position)
+    submitted_pool_well_col = re.findall("[0-9]+", submitted_position)
+    if submitted_pool_well_row and submitted_pool_well_col:
+        return (
+            submitted_container_name,
+            submitted_pool_well_row[0] + ":" + submitted_pool_well_col[0],
+        )
+    return submitted_container_name, submitted_position
+
+
+def normalize_reagent_label(reagent_label):
+    reagent_label_name = reagent_label.upper().strip()
+    match = re.search(r"\(([^()]*)\)", reagent_label_name)
+    if match:
+        return match.group(1).replace(" ", "")
+    return reagent_label_name.replace(" ", "")
+
+
 def prepare_index_table(process):
     data = []
     message = []
@@ -234,23 +259,9 @@ def prepare_index_table(process):
                 submitted_container_name = ""
                 submitted_pool_well = ""
                 if process.type.name == "Library Pooling (Finished Libraries) 4.0":
-                    submitted_container_name = sample.artifact.container.name.split(
-                        "-"
-                    )[0]
-                    try:
-                        submitted_pool_well_row = re.findall(
-                            "[a-zA-Z]+", sample.artifact.container.name.split("-")[2]
-                        )[0]
-                        submitted_pool_well_col = re.findall(
-                            "[0-9]+", sample.artifact.container.name.split("-")[2]
-                        )[0]
-                        submitted_pool_well = (
-                            submitted_pool_well_row + ":" + submitted_pool_well_col
-                        )
-                    except IndexError:
-                        submitted_pool_well = sample.artifact.container.name.split("-")[
-                            2
-                        ]
+                    submitted_container_name, submitted_pool_well = (
+                        parse_submitted_location(sample.artifact.container.name)
+                    )
                 sample_idxs = set()
                 find_barcode(sample_idxs, sample, process)
                 if sample_idxs:
@@ -343,11 +354,9 @@ def find_barcode(sample_idxs, sample, process):
                         )
                         sys.exit(2)
                     else:
-                        reagent_label_name = art.reagent_labels[0].upper()
-                        # Capture the format "XXXX (IDX1-IDX2)" that are in the Library Information Sheet
-                        match = re.search(r"\(([^()]*)\)", reagent_label_name)
-                        if match:
-                            reagent_label_name = match.group(1)
+                        reagent_label_name = normalize_reagent_label(
+                            art.reagent_labels[0]
+                        )
                         if reagent_label_name and reagent_label_name != "NOINDEX":
                             if (
                                 (
@@ -371,7 +380,7 @@ def find_barcode(sample_idxs, sample, process):
                                     f"INDEX FORMAT ERROR: Sample {sample.name} has a bad format or unknown index category\n"
                                 )
                                 sys.exit(2)
-                reagent_label_name = art.reagent_labels[0].upper().replace(" ", "")
+                reagent_label_name = normalize_reagent_label(art.reagent_labels[0])
                 idxs = (
                     TENX_SINGLE_PAT.findall(reagent_label_name)
                     or TENX_DUAL_PAT.findall(reagent_label_name)
