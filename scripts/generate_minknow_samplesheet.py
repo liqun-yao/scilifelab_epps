@@ -13,7 +13,7 @@ from genologics.entities import Artifact, Process
 from genologics.lims import Lims
 from tabulate import tabulate
 
-from data.ONT_barcodes import ont_label2dict, get_barcode_info
+from data.ONT_barcodes import get_barcode_info
 from scilifelab_epps.epp import get_pool_sample_label_mapping, upload_file
 from scilifelab_epps.wrapper import epp_decorator
 
