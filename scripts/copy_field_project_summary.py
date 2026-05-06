@@ -2,23 +2,33 @@ DESC = """EPP script to copy User Defined Fields (UDFs) across multiple levels i
 1. From Analyte level to Submitted Sample level (or Sample-Artifact if --aggregate is used).
 2. From Process level to Project level.
 
-The script is optimized for high-throughput projects (e.g., 1900+ samples) by using 
-unified API sessions and optimized file I/O to prevent server timeouts. It filters 
+The script is optimized for high-throughput projects (e.g., 1900+ samples) by using
+unified API sessions and optimized file I/O to prevent server timeouts. It filters
 for valid NGI samples using the pattern 'P[0-9]+_[0-9]+' to skip controls.
 
+IMPORTANT - For large projects (>500 samples):
+Use chunking to avoid timeouts. Example for 1920 samples with chunks of 400:
+  Chunk 0: --art_chunk_size 400 --art_chunk_index 0  # Processes samples 0-399
+  Chunk 1: --art_chunk_size 400 --art_chunk_index 1  # Processes samples 400-799
+  Chunk 2: --art_chunk_size 400 --art_chunk_index 2  # Processes samples 800-1199
+  Chunk 3: --art_chunk_size 400 --art_chunk_index 3  # Processes samples 1200-1599
+  Chunk 4: --art_chunk_size 400 --art_chunk_index 4  # Processes samples 1600-1920
+
+Use --proc_only_first_chunk to copy process UDFs only in chunk 0 (avoids duplicate project updates).
+
 Execution:
-Can be executed in the background or triggered by a user pressing a "blue button" 
+Can be executed in the background or triggered by a user pressing a "blue button"
 during step transitions.
 
 Log Files:
-1. Status Changelog (-c): Detailed audit trail including technician, date, and 
+1. Status Changelog (-c): Detailed audit trail including technician, date, and
    specific UDF value changes for every sample and project.
-2. Execution Log (--log): General runtime information, performance metrics, and 
+2. Execution Log (--log): General runtime information, performance metrics, and
    error handling.
 
 Error handling:
-If a source UDF is blank or undefined for any input or process, the script logs 
-the omission and continues with the remaining items without failing the entire 
+If a source UDF is blank or undefined for any input or process, the script logs
+the omission and continues with the remaining items without failing the entire
 automation.
 Written by Liqun Yao, Science for Life Laboratory, Stockholm, Sweden
 """
@@ -105,27 +115,55 @@ def queue_copy(source_obj, dest_obj, source_udf, dest_udf, pending_updates):
     return True
 
 
-def flush_updates(pending_updates, target_name, changelog_f, progress_tracker):
+def flush_updates(pending_updates, target_name, changelog_f, progress_tracker, lims):
     saved = 0
     failed = 0
     for idx, pending_update in enumerate(pending_updates.values(), start=1):
         dest_obj = pending_update["obj"]
-        try:
-            dest_obj.put()
-            saved += 1
-            if changelog_f:
-                changelog_f.writelines(pending_update["logs"])
-        except Exception as e:
-            failed += 1
-            logging.error(
-                f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
-            )
-            progress_tracker.write(
-                f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}': {e}"
-            )
-        if idx % 250 == 0:
-            logging.info(f"Saved {idx} {target_name} objects so far")
-            progress_tracker.write(f"Saved {idx} {target_name} objects so far")
+
+        # Refresh session every 100 objects to prevent timeout
+        if idx % 100 == 0:
+            try:
+                lims.get_projects()  # Simple API call to keep session alive
+                progress_tracker.write(f"Session keep-alive at {idx} objects")
+            except Exception as e:
+                logging.warning(f"Session keep-alive failed: {e}")
+
+        # Retry logic for transient failures
+        max_retries = 3
+        retry_delay = 2
+        for attempt in range(max_retries):
+            try:
+                dest_obj.put()
+                saved += 1
+                if changelog_f:
+                    changelog_f.writelines(pending_update["logs"])
+                break  # Success, exit retry loop
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logging.warning(
+                        f"Attempt {attempt + 1}/{max_retries} failed for {target_name} "
+                        f"'{getattr(dest_obj, 'id', dest_obj)}': {e}. Retrying..."
+                    )
+                    progress_tracker.write(
+                        f"Retry {attempt + 1}/{max_retries} for '{getattr(dest_obj, 'id', dest_obj)}'"
+                    )
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    failed += 1
+                    logging.error(
+                        f"Failed to update {target_name} '{getattr(dest_obj, 'id', dest_obj)}' "
+                        f"after {max_retries} attempts: {e}"
+                    )
+                    progress_tracker.write(
+                        f"FAILED after {max_retries} attempts: '{getattr(dest_obj, 'id', dest_obj)}': {e}"
+                    )
+
+        # More frequent progress updates for visibility
+        if idx % 100 == 0:
+            logging.info(f"Saved {idx}/{len(pending_updates)} {target_name} objects")
+            progress_tracker.write(f"Progress: {idx}/{len(pending_updates)} {target_name} objects saved")
     return saved, failed
 
 
@@ -201,7 +239,7 @@ def main(lims, args, epp_logger):
                     art_skipped += 1
 
         art_saved, art_failed = flush_updates(
-            art_pending_updates, "artifact destination", changelog_f, progress_tracker
+            art_pending_updates, "artifact destination", changelog_f, progress_tracker, lims
         )
         progress_tracker.write(
             f"Artifact flush complete updates={art_updates} skipped={art_skipped} "
@@ -256,7 +294,7 @@ def main(lims, args, epp_logger):
                     proc_skipped += 1
 
         proc_saved, proc_failed = flush_updates(
-            proc_pending_updates, "project", changelog_f, progress_tracker
+            proc_pending_updates, "project", changelog_f, progress_tracker, lims
         )
         progress_tracker.write(
             f"Project flush complete updates={proc_updates} skipped={proc_skipped} "
