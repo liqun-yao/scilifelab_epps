@@ -226,7 +226,7 @@ def main(lims, args, epp_logger):
             progress_tracker.write(
                 f"Queueing artifact copy source_udf='{source_udf}' dest_udf='{dest_udf}'"
             )
-            for artifact, dest_obj in artifact_targets:
+            for idx, (artifact, dest_obj) in enumerate(artifact_targets, start=1):
                 updated = queue_copy(
                     artifact, dest_obj,
                     source_udf, dest_udf,
@@ -238,9 +238,26 @@ def main(lims, args, epp_logger):
                 else:
                     art_skipped += 1
 
-        art_saved, art_failed = flush_updates(
-            art_pending_updates, "artifact destination", changelog_f, progress_tracker, lims
-        )
+                # Mini-batch flush every 200 objects to prevent timeout
+                if idx % 200 == 0 and art_pending_updates:
+                    progress_tracker.write(
+                        f"Mini-batch flush at {idx}/{len(artifact_targets)} artifacts"
+                    )
+                    logging.info(f"Mini-batch flush at {idx}/{len(artifact_targets)} artifacts")
+                    saved, failed = flush_updates(
+                        art_pending_updates, "artifact destination", changelog_f, progress_tracker, lims
+                    )
+                    art_saved += saved
+                    art_failed += failed
+                    art_pending_updates.clear()  # Clear processed updates
+
+        # Final flush for remaining updates
+        if art_pending_updates:
+            saved, failed = flush_updates(
+                art_pending_updates, "artifact destination", changelog_f, progress_tracker, lims
+            )
+            art_saved += saved
+            art_failed += failed
         progress_tracker.write(
             f"Artifact flush complete updates={art_updates} skipped={art_skipped} "
             f"saved={art_saved} failed={art_failed}"
