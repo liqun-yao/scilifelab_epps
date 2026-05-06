@@ -645,3 +645,13 @@ for lims_kit, labels in lims_kits2labels.items():
         )
 
         ont_label2dict[label] = label_dict
+
+
+# Build a reverse mapping from sequence to barcode info (for lookup by sequence)
+ont_seq2label: dict[str, dict] = {}
+for label, label_dict in ont_label2dict.items():
+    seq = label_dict["seq"]
+    # Store the barcode info keyed by sequence
+    # If multiple labels have the same sequence, keep the first one encountered
+    if seq not in ont_seq2label:
+        ont_seq2label[seq] = label_dict
