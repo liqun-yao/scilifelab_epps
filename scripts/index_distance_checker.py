@@ -91,6 +91,7 @@ def is_special_idx(idx_name):
         TENX_DUAL_PAT.findall(idx_name)
         or TENX_SINGLE_PAT.findall(idx_name)
         or SMARTSEQ_PAT.findall(idx_name)
+        or ONT_PAT.findall(idx_name)
         or idx_name == "NoIndex"
     ):
         return True
