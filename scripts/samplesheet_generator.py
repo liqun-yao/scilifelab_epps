@@ -14,6 +14,7 @@ from genologics.entities import Process
 from genologics.lims import Lims
 
 from data.Chromium_10X_indexes import Chromium_10X_indexes
+from data.PhiX_indexes import PhiX_indexed_control
 
 # Load SS3 indexes
 SMARTSEQ3_indexes_json = (
@@ -33,6 +34,63 @@ NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
 SEQSETUP_PAT = re.compile("[0-9]+-[0-9A-z]+-[0-9A-z]+-[0-9]+")
 
 compl = {"A": "T", "C": "G", "G": "C", "T": "A"}
+
+
+def add_phix_controls(data, fc_id, lane, operator, pro):
+    """Add PhiX Indexed Control samples to samplesheet data.
+
+    Add 5 PhiX control samples with their
+    dual-index combinations when 'Indexed PhiX' is selected.
+
+    Args:
+        data: List of sample dictionaries to append PhiX controls to
+        fc_id: Flowcell ID
+        lane: Lane number
+        operator: Technician name
+        pro: Process object (to determine index2 orientation)
+
+    Returns:
+        Updated data list with PhiX controls added
+    """
+    process_type = pro.type.name
+
+    for phix_name, phix_info in PhiX_indexed_control.items():
+        phix_obj = {}
+        phix_obj["fc"] = fc_id
+        phix_obj["lane"] = lane
+        phix_obj["sn"] = phix_name
+        phix_obj["sid"] = f"Sample_{phix_name}"
+        phix_obj["pj"] = "PhiX_Control"
+        phix_obj["ref"] = "PhiX"
+        phix_obj["ct"] = "N"
+        phix_obj["rc"] = "0-0"
+        phix_obj["op"] = operator
+        phix_obj["idx1"] = phix_info["i7"]
+
+        # Handle index2 orientation based on platform
+        # MiSeq and MiSeq i100: forward i5
+        # NovaSeq XPlus and NextSeq: reverse-complement i5
+        # NovaSeq 6000: depends on reagent version
+        if "MiSeq" in process_type:
+            # MiSeq and MiSeq i100: use forward i5
+            phix_obj["idx2"] = phix_info["i5"]
+        elif "NovaSeq 6000" in process_type:
+            # NovaSeq 6000: depends on reagent version
+            if pro.udf.get("Reagent Version") == "v1.5":
+                phix_obj["idx2"] = phix_info["i5"]
+            else:  # v1.0 or default to RC
+                phix_obj["idx2"] = "".join(
+                    reversed([compl.get(b, b) for b in phix_info["i5"].upper()])
+                )
+        else:
+            # NovaSeq XPlus, NextSeq: reverse-complement i5
+            phix_obj["idx2"] = "".join(
+                reversed([compl.get(b, b) for b in phix_info["i5"].upper()])
+            )
+
+        data.append(phix_obj)
+
+    return data
 
 
 def check_index_distance(data, log):
@@ -154,6 +212,15 @@ def gen_Novaseq_lane_data(pro):
                     else:
                         sp_obj["idx2"] = ""
                     data.append(sp_obj)
+
+    # Check if PhiX Indexed Control should be added for any output
+    for out in pro.all_outputs():
+        if out.type == "Analyte" and out.udf.get("Illumina PhiX Set") == "Indexed PhiX":
+            fc_id = out.location[0].name.replace(",", "").upper()
+            lane = out.location[1].split(":")[0].replace(",", "")
+            operator = pro.technician.name.replace(" ", "_").replace(",", "")
+            data = add_phix_controls(data, fc_id, lane, operator, pro)
+
     header = "{}\n".format(",".join(header_ar))
     str_data = ""
     for line in sorted(data, key=lambda x: x["lane"]):
@@ -249,6 +316,15 @@ def gen_NovaSeqXPlus_lane_data(pro):
                     else:
                         sp_obj["idx2"] = ""
                     data.append(sp_obj)
+
+    # Check if PhiX Indexed Control should be added for any output
+    for out in pro.all_outputs():
+        if out.type == "Analyte" and out.udf.get("Illumina PhiX Set") == "Indexed PhiX":
+            fc_id = out.location[0].name.replace(",", "").upper()
+            lane = out.location[1].split(":")[0].replace(",", "")
+            operator = pro.technician.name.replace(" ", "_").replace(",", "")
+            data = add_phix_controls(data, fc_id, lane, operator, pro)
+
     header = "{}\n".format(",".join(header_ar))
     str_data = ""
     for line in sorted(data, key=lambda x: x["lane"]):
@@ -500,6 +576,14 @@ def gen_Miseq_data(pro):
                             sp_obj["idx2"] = ""
                         data.append(sp_obj)
 
+    # Check if PhiX Indexed Control should be added for any output
+    for out in pro.all_outputs():
+        if out.type == "Analyte" and out.udf.get("Illumina PhiX Set") == "Indexed PhiX":
+            fc_id = out.location[0].name.replace(",", "").upper()
+            lane = "1"  # MiSeq always uses lane 1
+            operator = pro.technician.name.replace(" ", "_").replace(",", "")
+            data = add_phix_controls(data, fc_id, lane, operator, pro)
+
     if is_key_empty_in_all_dicts("idx1", data):
         header_ar.remove("index")
         key_order.remove("idx1")
@@ -615,6 +699,15 @@ def gen_Nextseq_lane_data(pro, rc_idx2=False):
                     else:
                         sp_obj["idx2"] = ""
                     data.append(sp_obj)
+
+    # Check if PhiX Indexed Control should be added for any output
+    for out in pro.all_outputs():
+        if out.type == "Analyte" and out.udf.get("Illumina PhiX Set") == "Indexed PhiX":
+            fc_id = out.location[0].name.replace(",", "").upper().replace("+", "-")
+            lane = out.location[1].split(":")[0].replace(",", "")
+            operator = pro.technician.name.replace(" ", "_").replace(",", "")
+            data = add_phix_controls(data, fc_id, lane, operator, pro)
+
     header = "{}\n".format(",".join(header_ar))
     str_data = ""
     for line in sorted(data, key=lambda x: x["lane"]):

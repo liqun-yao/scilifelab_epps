@@ -13,6 +13,7 @@ from genologics.lims import Lims
 
 from data.Chromium_10X_indexes import Chromium_10X_indexes
 from data.ONT_barcodes import ont_name2seq, get_barcode_info
+from data.PhiX_indexes import PhiX_index_pairs, PhiX_indexed_control
 from scilifelab_epps.epp import attach_file
 
 SMARTSEQ3_indexes_json = (
@@ -219,6 +220,59 @@ def my_distance(idx_a, idx_b):
         if c != lon[i]:
             diffs += 1
     return diffs
+
+
+def check_phix_collision(data):
+    """Check if sample indexes collide with PhiX Indexed Control indexes.
+
+    For Model A (Targeted Use), PhiX Indexed Control should only be used for:
+    - Low index diversity pools (< 5 unique index combinations)
+    - Long-read chemistry (> 350 total cycles)
+
+    This function warns about potential collisions between sample indexes and
+    the 5 PhiX index pairs to help decide if Indexed PhiX can be safely used.
+    """
+    message = []
+    pools = {x["pool"] for x in data}
+
+    for p in sorted(pools):
+        subset = [i for i in data if i["pool"] == p]
+        if len(subset) == 0:
+            continue
+
+        # Check each sample against PhiX indexes
+        for sample in subset:
+            sample_idx1 = sample.get("idx1", "")
+            sample_idx2 = sample.get("idx2", "")
+
+            if not sample_idx1:  # Skip samples without indexes
+                continue
+
+            # Check against each PhiX index pair
+            for phix_idx, (phix_i7, phix_i5) in enumerate(PhiX_index_pairs, start=1):
+                # Calculate distance for dual-indexed samples
+                distance = 0
+                if sample_idx1:
+                    distance += my_distance(sample_idx1.upper(), phix_i7.upper())
+                if sample_idx2 and phix_i5:
+                    distance += my_distance(sample_idx2.upper(), phix_i5.upper())
+
+                # Report collisions or close matches
+                if distance == 0:
+                    message.append(
+                        f"PHIX COLLISION ERROR: Sample {sample.get('sn', '')} in pool {p} "
+                        f"has identical indexes to PhiX-Index{phix_idx} ({phix_i7}-{phix_i5}). "
+                        f"Cannot use Indexed PhiX with this pool."
+                    )
+                elif distance == 1:
+                    message.append(
+                        f"PHIX INDEX WARNING: Sample {sample.get('sn', '')} in pool {p} "
+                        f"has indexes {sample_idx1}-{sample_idx2} only 1 base different from "
+                        f"PhiX-Index{phix_idx} ({phix_i7}-{phix_i5}). "
+                        f"Risk of demultiplexing issues if Indexed PhiX is used."
+                    )
+
+    return message
 
 
 def parse_submitted_location(container_name):
@@ -448,6 +502,11 @@ def main(lims, pid, auto):
         message += verify_samplename(data)
     else:
         message = check_index_distance(data)
+
+    # Always check for PhiX collisions (Model A: Targeted Use)
+    phix_warnings = check_phix_collision(data)
+    if phix_warnings:
+        message += phix_warnings
     warning_start = "**Warnings from Verify Indexes and Placement EPP: **\n"
     warning_end = "== End of Verify Indexes and Placement EPP warnings =="
     if message:
