@@ -172,7 +172,7 @@ def main(lims, args):
     for inp, out in currentStep.input_output_maps:
         if out["output-generation-type"] != "PerInput":
             continue
-        if out["uri"].type != "Analyte":
+        if not out["uri"].location[1]:  # skip outputs without a well location
             continue
 
         inp_art = inp["uri"]
