@@ -35,6 +35,9 @@ MIN_SAMPLE_VOL = 2.0        # Minimum sample volume (uL)
 TARGET_TOTAL_VOL = 10.0     # Starting target for total volume (uL)
 
 
+SUPPORTED_MASS_UNITS = {"ng/ul", "ng/uL", "ng/mL", "pg/uL", "pg/ul"}
+
+
 def _to_ng_ul(conc, units):
     """Convert concentration value to ng/uL."""
     if units in ("ng/ul", "ng/uL"):
@@ -44,6 +47,45 @@ def _to_ng_ul(conc, units):
     elif units in ("pg/uL", "pg/ul"):
         return conc / 1000.0
     return conc  # assume ng/uL if unit is unrecognised
+
+
+def _trace_ngul_concentration(art):
+    """Walk the artifact lineage backward to find a concentration in ng/uL.
+
+    Used when the current artifact's concentration is stored in a non-mass unit
+    (e.g. nM from a library normalisation step).  Follows the PerInput
+    input-output links of each parent process until a 'Concentration' UDF with
+    a supported mass unit is found.
+
+    Returns (conc_ng_ul, None) on success, or (None, warning_str) on failure.
+    """
+    seen_ids = {art.id}
+    current = art
+    while True:
+        pp = current.parent_process
+        if pp is None:
+            break
+        # Locate the input artifact that produced 'current' in this process
+        prev_art = None
+        for pp_inp, pp_out in pp.input_output_maps:
+            if (
+                pp_out.get("output-generation-type") == "PerInput"
+                and pp_out["uri"].id == current.id
+            ):
+                prev_art = pp_inp["uri"]
+                break
+        if prev_art is None or prev_art.id in seen_ids:
+            break
+        seen_ids.add(prev_art.id)
+        current = prev_art
+        if "Concentration" in current.udf:
+            units = current.udf["Conc. Units"] if "Conc. Units" in current.udf else "ng/uL"
+            if units in SUPPORTED_MASS_UNITS:
+                return _to_ng_ul(float(current.udf["Concentration"]), units), None
+    return None, (
+        f"Concentration for '{art.samples[0].name}' is not in a supported mass "
+        f"unit and no ng/uL value was found in the process history."
+    )
 
 
 def get_concentration(inp_art):
@@ -70,6 +112,10 @@ def get_concentration(inp_art):
 
         conc = float(inp_art.udf["Concentration"])
         units = inp_art.udf["Conc. Units"] if "Conc. Units" in inp_art.udf else "ng/uL"
+        if units not in SUPPORTED_MASS_UNITS:
+            # Non-mass unit (e.g. nM from library normalisation) — trace back
+            # through the process history to find the Qubit/Quant-IT ng/uL value.
+            return _trace_ngul_concentration(inp_art)
         return _to_ng_ul(conc, units), None
 
     except Exception as e:
