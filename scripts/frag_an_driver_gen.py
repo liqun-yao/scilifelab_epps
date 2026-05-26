@@ -49,51 +49,57 @@ def _to_ng_ul(conc, units):
     return conc  # assume ng/uL if unit is unrecognised
 
 
-def _trace_ngul_concentration(art):
-    """Walk the artifact lineage backward to find a concentration in ng/uL.
+def _get_latest_ngul_measurement(inp_art):
+    """Find the latest ng/uL concentration from a Quant-iT or Plate Reader
+    measurement ResultFile for the same sample.
 
-    Used when the current artifact's concentration is stored in a non-mass unit
-    (e.g. nM from a library normalisation step).  Follows the PerInput
-    input-output links of each parent process until a 'Concentration' UDF with
-    a supported mass unit is found.
+    Searches all ResultFile artifacts associated with the sample, filters those
+    whose name contains 'Measurement' and whose 'Concentration' UDF is in a
+    supported mass unit, then returns the value from the most recent process
+    (sorted by the numeric part of the process ID).
 
     Returns (conc_ng_ul, None) on success, or (None, warning_str) on failure.
     """
-    seen_ids = {art.id}
-    current = art
-    while True:
-        pp = current.parent_process
-        if pp is None:
-            break
-        # Locate the input artifact that produced 'current' in this process
-        prev_art = None
-        for pp_inp, pp_out in pp.input_output_maps:
-            if (
-                pp_out.get("output-generation-type") == "PerInput"
-                and pp_out["uri"].id == current.id
-            ):
-                prev_art = pp_inp["uri"]
-                break
-        if prev_art is None or prev_art.id in seen_ids:
-            break
-        seen_ids.add(prev_art.id)
-        current = prev_art
-        if "Concentration" in current.udf:
-            units = current.udf["Conc. Units"] if "Conc. Units" in current.udf else "ng/uL"
-            if units in SUPPORTED_MASS_UNITS:
-                return _to_ng_ul(float(current.udf["Concentration"]), units), None
-    return None, (
-        f"Concentration for '{art.samples[0].name}' is not in a supported mass "
-        f"unit and no ng/uL value was found in the process history."
+    sample_id = inp_art.samples[0].id
+    sample_name = inp_art.samples[0].name
+
+    result_files = inp_art.lims.get_artifacts(
+        samplelimsid=sample_id, type="ResultFile"
     )
+
+    candidates = []
+    for rf in result_files:
+        if "Measurement" not in rf.name:
+            continue
+        conc = rf.udf.get("Concentration")
+        units = rf.udf["Conc. Units"] if "Conc. Units" in rf.udf else "ng/uL"
+        if conc is not None and units in SUPPORTED_MASS_UNITS:
+            candidates.append(rf)
+
+    if not candidates:
+        return None, (
+            f"No ng/uL Quant-iT or Plate Reader measurement found for '{sample_name}'."
+        )
+
+    # Most recent process has the highest numeric ID
+    candidates.sort(
+        key=lambda rf: int(rf.parent_process.id.split("-")[1]), reverse=True
+    )
+    latest = candidates[0]
+    conc = float(latest.udf["Concentration"])
+    units = latest.udf["Conc. Units"] if "Conc. Units" in latest.udf else "ng/uL"
+    return _to_ng_ul(conc, units), None
 
 
 def get_concentration(inp_art):
     """Return (conc_ng_ul, warning_str) for an input artifact.
 
-    Follows the same pattern as bravo_csv.py: if the input came from a
-    'Diluting Samples' step, read 'Final Concentration' instead of
-    'Concentration'.  Returns (None, message) when no value is found.
+    Concentration is sourced in the following priority order:
+      1. 'Final Concentration' UDF, when the parent step is 'Diluting Samples'.
+      2. The most recent Quant-iT or Plate Reader measurement ResultFile (ng/uL).
+      3. 'Concentration' UDF on the current artifact, if in a supported mass unit.
+
+    Returns (None, message) when no usable value is found.
     """
     try:
         try:
@@ -104,19 +110,21 @@ def get_concentration(inp_art):
         except AttributeError:
             pass
 
-        if "Concentration" not in inp_art.udf:
-            return None, (
-                f"No 'Concentration' UDF found for sample "
-                f"'{inp_art.samples[0].name}' — no value to calculate dilution from."
-            )
+        # Priority 1: latest ng/uL measurement ResultFile (Quant-iT / Plate Reader)
+        conc_ng_ul, _ = _get_latest_ngul_measurement(inp_art)
+        if conc_ng_ul is not None:
+            return conc_ng_ul, None
 
-        conc = float(inp_art.udf["Concentration"])
-        units = inp_art.udf["Conc. Units"] if "Conc. Units" in inp_art.udf else "ng/uL"
-        if units not in SUPPORTED_MASS_UNITS:
-            # Non-mass unit (e.g. nM from library normalisation) — trace back
-            # through the process history to find the Qubit/Quant-IT ng/uL value.
-            return _trace_ngul_concentration(inp_art)
-        return _to_ng_ul(conc, units), None
+        # Priority 2: concentration on the current artifact (mass unit only)
+        if "Concentration" in inp_art.udf:
+            conc = float(inp_art.udf["Concentration"])
+            units = inp_art.udf["Conc. Units"] if "Conc. Units" in inp_art.udf else "ng/uL"
+            if units in SUPPORTED_MASS_UNITS:
+                return _to_ng_ul(conc, units), None
+
+        return None, (
+            f"No ng/uL concentration found for sample '{inp_art.samples[0].name}'."
+        )
 
     except Exception as e:
         return None, (
