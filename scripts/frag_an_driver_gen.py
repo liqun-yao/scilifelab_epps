@@ -140,9 +140,11 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     concentration is used and blanket_df is only a fallback for samples that
     have no concentration value.
 
-    Returns (sample_vol, eb_vol) rounded to 2 d.p., or (None, None) when
-    neither a measured concentration nor a blanket dilution factor is available.
+    Returns (sample_vol, eb_vol, used_default_df), where used_default_df is True
+    only when neither concentration nor blanket dilution factor is available and
+    the minimum default dilution factor (1:5) is applied.
     """
+    used_default_df = False
     if force_blanket and blanket_df is not None:
         df = max(float(blanket_df), MIN_DILUTION_FACTOR)
     elif not force_blanket and conc_ng_ul is not None and conc_ng_ul > 0:
@@ -150,7 +152,9 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     elif blanket_df is not None:
         df = max(float(blanket_df), MIN_DILUTION_FACTOR)
     else:
-        return None, None
+        # No concentration and no blanket factor: use default 1:5 dilution
+        df = MIN_DILUTION_FACTOR
+        used_default_df = True
 
     sample_vol = TARGET_TOTAL_VOL / df
     if sample_vol < MIN_SAMPLE_VOL:
@@ -159,7 +163,7 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
 
     total_vol = sample_vol * df
     eb_vol = total_vol - sample_vol
-    return round(sample_vol, 2), round(eb_vol, 2)
+    return round(sample_vol, 2), round(eb_vol, 2), used_default_df
 
 
 def main(lims, args):
@@ -222,7 +226,11 @@ def main(lims, args):
     # --- Build dilution rows from input-output maps ---
     rows = []
     warnings = []
+    samples_with_default_df = []
+    sample_conc_map = {}  # Track which samples have concentration
 
+    # First pass: collect all samples and their concentration status
+    all_samples = []
     for inp, out in currentStep.input_output_maps:
         if out["output-generation-type"] != "PerInput":
             continue
@@ -240,18 +248,51 @@ def main(lims, args):
         if warn:
             warnings.append(warn)
 
-        sample_vol, eb_vol = calculate_volumes(
+        all_samples.append(
+            (inp_art, out_art, sample_name, source_well, dest_well, conc_ng_ul)
+        )
+        sample_conc_map[sample_name] = conc_ng_ul is not None and conc_ng_ul > 0
+
+    # Check if no samples have concentration and no blanket factor is set
+    samples_with_conc = sum(1 for has_conc in sample_conc_map.values() if has_conc)
+    total_samples = len(sample_conc_map)
+
+    if total_samples > 0 and samples_with_conc == 0 and blanket_df is None:
+        sys.exit(
+            f"ERROR: No samples in this project have usable concentration and "
+            f"'Blanket Dilution Factor' is not set. "
+            f"Please set 'Blanket Dilution Factor' and check "
+            f"'Force Blanket Dilution' to 'Yes' in the LIMS step."
+        )
+
+    # Second pass: calculate volumes
+    for inp_art, out_art, sample_name, source_well, dest_well, conc_ng_ul in all_samples:
+        sample_vol, eb_vol, used_default_df = calculate_volumes(
             conc_ng_ul, target_conc, blanket_df, force_blanket
         )
 
-        if sample_vol is None:
-            warnings.append(
-                f"No concentration or blanket dilution factor available for "
-                f"'{sample_name}' — volumes left as N/A."
-            )
-            rows.append((sample_name, source_well, "N/A", "N/A", dest_well))
-        else:
-            rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
+        if used_default_df:
+            samples_with_default_df.append(sample_name)
+
+        rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
+
+    if samples_with_default_df:
+        warnings.append(
+            f"WARNING: {len(samples_with_default_df)} sample(s) used standard "
+            f"1:5 dilution due to missing concentration."
+        )
+
+    # --- Add ladder based on instrument ---
+    if instrument == "fatboy":
+        # Ladder in well 12 of the last column used
+        if rows:
+            columns_used = set(row[4][0] for row in rows)
+            last_column = sorted(columns_used)[-1]
+            ladder_well = f"{last_column}12"
+            rows.append(("ladder", "", "N/A", "N/A", ladder_well))
+    elif instrument == "fergie":
+        # Ladder always in H12
+        rows.append(("ladder", "", "N/A", "N/A", "H12"))
 
     # --- Write CSV ---
     filename = f"frag_an_driver_{instrument}.csv"
