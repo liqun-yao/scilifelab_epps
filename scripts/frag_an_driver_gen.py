@@ -25,14 +25,14 @@ Optional step UDFs:
 
 # Target concentrations (ng/uL) for each analysis mode
 ANALYSIS_TYPES = {
-    "Smear Analysis": 1.0,   # Range 0.5 – 5 ng/uL, ideal 1 ng/uL
-    "Single Peak": 0.05,     # Range 5 – 500 pg/uL (0.005 – 0.5 ng/uL), ideal ~50 pg/uL
+    "Smear Analysis": 1.0,  # Range 0.5 – 5 ng/uL, ideal 1 ng/uL
+    "Single Peak": 0.05,  # Range 5 – 500 pg/uL (0.005 – 0.5 ng/uL), ideal ~50 pg/uL
 }
 DEFAULT_ANALYSIS_TYPE = "Smear Analysis"
 
-MIN_DILUTION_FACTOR = 5.0   # Always at least 1:5 dilution
-MIN_SAMPLE_VOL = 2.0        # Minimum sample volume (uL)
-TARGET_TOTAL_VOL = 10.0     # Starting target for total volume (uL)
+MIN_DILUTION_FACTOR = 5.0  # Always at least 1:5 dilution
+MIN_SAMPLE_VOL = 2.0  # Minimum sample volume (uL)
+TARGET_TOTAL_VOL = 10.0  # Starting target for total volume (uL)
 
 
 SUPPORTED_MASS_UNITS = {"ng/ul", "ng/uL", "ng/mL", "pg/uL", "pg/ul"}
@@ -49,6 +49,11 @@ def _to_ng_ul(conc, units):
     return conc  # assume ng/uL if unit is unrecognised
 
 
+def _get_conc_units(udf_dict):
+    """Return concentration units from a UDF dict, defaulting to ng/uL."""
+    return udf_dict["Conc. Units"] if "Conc. Units" in udf_dict else "ng/uL"
+
+
 def _get_latest_ngul_measurement(inp_art):
     """Find the latest ng/uL concentration from a Quant-iT or Plate Reader
     measurement ResultFile for the same sample.
@@ -63,16 +68,14 @@ def _get_latest_ngul_measurement(inp_art):
     sample_id = inp_art.samples[0].id
     sample_name = inp_art.samples[0].name
 
-    result_files = inp_art.lims.get_artifacts(
-        samplelimsid=sample_id, type="ResultFile"
-    )
+    result_files = inp_art.lims.get_artifacts(samplelimsid=sample_id, type="ResultFile")
 
     candidates = []
     for rf in result_files:
         if "Measurement" not in rf.name:
             continue
         conc = rf.udf.get("Concentration")
-        units = rf.udf["Conc. Units"] if "Conc. Units" in rf.udf else "ng/uL"
+        units = _get_conc_units(rf.udf)
         if conc is not None and units in SUPPORTED_MASS_UNITS:
             candidates.append(rf)
 
@@ -87,7 +90,7 @@ def _get_latest_ngul_measurement(inp_art):
     )
     latest = candidates[0]
     conc = float(latest.udf["Concentration"])
-    units = latest.udf["Conc. Units"] if "Conc. Units" in latest.udf else "ng/uL"
+    units = _get_conc_units(latest.udf)
     return _to_ng_ul(conc, units), None
 
 
@@ -105,7 +108,7 @@ def get_concentration(inp_art):
         try:
             if inp_art.parent_process.type.name == "Diluting Samples":
                 conc = float(inp_art.udf["Final Concentration"])
-                units = inp_art.udf["Conc. Units"] if "Conc. Units" in inp_art.udf else "ng/uL"
+                units = _get_conc_units(inp_art.udf)
                 return _to_ng_ul(conc, units), None
         except AttributeError:
             pass
@@ -118,7 +121,7 @@ def get_concentration(inp_art):
         # Priority 2: concentration on the current artifact (mass unit only)
         if "Concentration" in inp_art.udf:
             conc = float(inp_art.udf["Concentration"])
-            units = inp_art.udf["Conc. Units"] if "Conc. Units" in inp_art.udf else "ng/uL"
+            units = _get_conc_units(inp_art.udf)
             if units in SUPPORTED_MASS_UNITS:
                 return _to_ng_ul(conc, units), None
 
@@ -140,9 +143,11 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     concentration is used and blanket_df is only a fallback for samples that
     have no concentration value.
 
-    Returns (sample_vol, eb_vol) rounded to 2 d.p., or (None, None) when
-    neither a measured concentration nor a blanket dilution factor is available.
+    Returns (sample_vol, eb_vol, used_default_df), where used_default_df is True
+    only when neither concentration nor blanket dilution factor is available and
+    the minimum default dilution factor (1:5) is applied.
     """
+    used_default_df = False
     if force_blanket and blanket_df is not None:
         df = max(float(blanket_df), MIN_DILUTION_FACTOR)
     elif not force_blanket and conc_ng_ul is not None and conc_ng_ul > 0:
@@ -150,7 +155,9 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     elif blanket_df is not None:
         df = max(float(blanket_df), MIN_DILUTION_FACTOR)
     else:
-        return None, None
+        # No concentration and no blanket factor: use default 1:5 dilution
+        df = MIN_DILUTION_FACTOR
+        used_default_df = True
 
     sample_vol = TARGET_TOTAL_VOL / df
     if sample_vol < MIN_SAMPLE_VOL:
@@ -159,7 +166,7 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
 
     total_vol = sample_vol * df
     eb_vol = total_vol - sample_vol
-    return round(sample_vol, 2), round(eb_vol, 2)
+    return round(sample_vol, 2), round(eb_vol, 2), used_default_df
 
 
 def main(lims, args):
@@ -222,7 +229,13 @@ def main(lims, args):
     # --- Build dilution rows from input-output maps ---
     rows = []
     warnings = []
+    samples_with_default_df = []
+    concentration_warning_count = 0
+    total_samples = 0
+    samples_with_conc = 0
 
+    # First pass: collect all samples and their concentration status
+    all_samples = []
     for inp, out in currentStep.input_output_maps:
         if out["output-generation-type"] != "PerInput":
             continue
@@ -235,28 +248,66 @@ def main(lims, args):
         sample_name = inp_art.samples[0].name
         source_well = inp_art.location[1].replace(":", "")
         dest_well = out_art.location[1].replace(":", "")
+        total_samples += 1
 
         conc_ng_ul, warn = get_concentration(inp_art)
         if warn:
-            warnings.append(warn)
+            concentration_warning_count += 1
+        if conc_ng_ul is not None and conc_ng_ul > 0:
+            samples_with_conc += 1
 
-        sample_vol, eb_vol = calculate_volumes(
+        all_samples.append((sample_name, source_well, dest_well, conc_ng_ul))
+
+    # Check if no samples have concentration and no blanket factor is set
+    if total_samples > 0 and samples_with_conc == 0 and blanket_df is None:
+        sys.exit(
+            "ERROR: No samples in this project have usable concentration and "
+            "'Blanket Dilution Factor' is not set. "
+            "Please set 'Blanket Dilution Factor' and check "
+            "'Force Blanket Dilution' to 'Yes' in the LIMS step."
+        )
+
+    # Second pass: calculate volumes
+    for sample_name, source_well, dest_well, conc_ng_ul in all_samples:
+        sample_vol, eb_vol, used_default_df = calculate_volumes(
             conc_ng_ul, target_conc, blanket_df, force_blanket
         )
 
-        if sample_vol is None:
-            warnings.append(
-                f"No concentration or blanket dilution factor available for "
-                f"'{sample_name}' — volumes left as N/A."
-            )
-            rows.append((sample_name, source_well, "N/A", "N/A", dest_well))
-        else:
-            rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
+        if used_default_df:
+            samples_with_default_df.append(sample_name)
+
+        rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
+
+    if concentration_warning_count:
+        warnings.append(
+            f"WARNING: {concentration_warning_count} sample(s) had missing or "
+            "unusable concentration information."
+        )
+
+    if samples_with_default_df:
+        warnings.append(
+            f"WARNING: {len(samples_with_default_df)} sample(s) used standard "
+            f"1:5 dilution due to missing concentration."
+        )
+
+    # --- Add ladder based on instrument ---
+    if instrument == "fatboy":
+        # Ladder in well 12 of the last column used
+        if rows:
+            columns_used = set(row[4][0] for row in rows)
+            last_column = sorted(columns_used)[-1]
+            ladder_well = f"{last_column}12"
+            rows.append(("ladder", "", "N/A", "N/A", ladder_well))
+    elif instrument == "fergie":
+        # Ladder always in H12
+        rows.append(("ladder", "", "N/A", "N/A", "H12"))
 
     # --- Write CSV ---
     filename = f"frag_an_driver_{instrument}.csv"
     with open(filename, "w") as f:
-        f.write("Sample Name,Source Well,Sample Volume (uL),EB Volume (uL),Destination Well\n")
+        f.write(
+            "Sample Name,Source Well,Sample Volume (uL),EB Volume (uL),Destination Well\n"
+        )
         for row in rows:
             f.write(f"{row[0]},{row[1]},{row[2]},{row[3]},{row[4]}\n")
 
