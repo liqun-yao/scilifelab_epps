@@ -66,17 +66,25 @@ def main(lims, args):
                 dilution_fold = 1
                 sample = io[0]["uri"].samples[0]
                 try:
-                    dilution_fold = float(sample.udf["FA Dilution Fold"])
+                    dilution_fold = float(io[1]["uri"].udf["FA Dilution Fold"])
                 except KeyError:
-                    log.append(
-                        "No sample-level FA Dilution Fold found for {}. "
-                        "Using Fragment Analyzer concentration without correction.".format(
-                            sample.name
+                    try:
+                        dilution_fold = float(sample.udf["FA Dilution Fold"])
+                    except KeyError:
+                        log.append(
+                            "No artifact- or sample-level FA Dilution Fold found "
+                            "for {}. Using Fragment Analyzer concentration without "
+                            "correction.".format(sample.name)
                         )
-                    )
+                    except Exception as e:
+                        log.append(
+                            "Could not read sample-level FA Dilution Fold for {}: "
+                            "{}. Using Fragment Analyzer concentration without "
+                            "correction.".format(sample.name, e)
+                        )
                 except Exception as e:
                     log.append(
-                        "Could not read sample-level FA Dilution Fold for {}: {}. "
+                        "Could not read artifact-level FA Dilution Fold for {}: {}. "
                         "Using Fragment Analyzer concentration without correction.".format(
                             sample.name, e
                         )

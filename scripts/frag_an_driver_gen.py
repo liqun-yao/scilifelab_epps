@@ -257,7 +257,7 @@ def main(lims, args):
             samples_with_conc += 1
 
         all_samples.append(
-            (inp_art.samples[0], sample_name, source_well, dest_well, conc_ng_ul)
+            (out_art, sample_name, source_well, dest_well, conc_ng_ul)
         )
 
     # Check if no samples have concentration and no blanket factor is set
@@ -270,7 +270,7 @@ def main(lims, args):
         )
 
     # Second pass: calculate volumes
-    for sample, sample_name, source_well, dest_well, conc_ng_ul in all_samples:
+    for out_art, sample_name, source_well, dest_well, conc_ng_ul in all_samples:
         sample_vol, eb_vol, dilution_factor, used_default_df = calculate_volumes(
             conc_ng_ul, target_conc, blanket_df, force_blanket
         )
@@ -278,8 +278,8 @@ def main(lims, args):
         if used_default_df:
             samples_with_default_df.append(sample_name)
 
-        sample.udf["FA Dilution Fold"] = dilution_factor
-        sample.put()
+        out_art.udf["FA Dilution Fold"] = dilution_factor
+        out_art.put()
 
         rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
 
