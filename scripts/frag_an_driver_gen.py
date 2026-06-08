@@ -33,6 +33,7 @@ DEFAULT_ANALYSIS_TYPE = "Smear Analysis"
 MIN_DILUTION_FACTOR = 5.0  # Always at least 1:5 dilution
 MIN_SAMPLE_VOL = 2.0  # Minimum sample volume (uL)
 TARGET_TOTAL_VOL = 10.0  # Starting target for total volume (uL)
+PLATE_ROWS = "ABCDEFGH"
 
 
 SUPPORTED_MASS_UNITS = {"ng/ul", "ng/uL", "ng/mL", "pg/uL", "pg/ul"}
@@ -169,6 +170,22 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     return round(sample_vol, 2), round(eb_vol, 2), round(df, 4), used_default_df
 
 
+def get_fatboy_ladder_well(rows):
+    """Return the first available row-12 well at or after the last sample row."""
+    occupied_wells = {row[4] for row in rows}
+    used_rows = [well[0] for well in occupied_wells if well and well[0] in PLATE_ROWS]
+    if not used_rows:
+        return "A12"
+
+    last_row = max(used_rows, key=PLATE_ROWS.index)
+    for row in PLATE_ROWS[PLATE_ROWS.index(last_row) :]:
+        ladder_well = f"{row}12"
+        if ladder_well not in occupied_wells:
+            return ladder_well
+
+    sys.exit("ERROR: No available Fatboy ladder well in column 12.")
+
+
 def main(lims, args):
     currentStep = Process(lims, id=args.pid)
 
@@ -297,11 +314,9 @@ def main(lims, args):
 
     # --- Add ladder based on instrument ---
     if instrument == "fatboy":
-        # Ladder in well 12 of the last column used
+        # Ladder in well 12 of the last sample row, or the next available row.
         if rows:
-            columns_used = set(row[4][0] for row in rows)
-            last_column = sorted(columns_used)[-1]
-            ladder_well = f"{last_column}12"
+            ladder_well = get_fatboy_ladder_well(rows)
             rows.append(("ladder", "", "N/A", "N/A", ladder_well))
     elif instrument == "fergie":
         # Ladder always in H12
