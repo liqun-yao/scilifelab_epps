@@ -143,9 +143,9 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
     concentration is used and blanket_df is only a fallback for samples that
     have no concentration value.
 
-    Returns (sample_vol, eb_vol, used_default_df), where used_default_df is True
-    only when neither concentration nor blanket dilution factor is available and
-    the minimum default dilution factor (1:5) is applied.
+    Returns (sample_vol, eb_vol, dilution_factor, used_default_df), where
+    used_default_df is True only when neither concentration nor blanket dilution
+    factor is available and the minimum default dilution factor (1:5) is applied.
     """
     used_default_df = False
     if force_blanket and blanket_df is not None:
@@ -166,7 +166,7 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
 
     total_vol = sample_vol * df
     eb_vol = total_vol - sample_vol
-    return round(sample_vol, 2), round(eb_vol, 2), used_default_df
+    return round(sample_vol, 2), round(eb_vol, 2), round(df, 4), used_default_df
 
 
 def main(lims, args):
@@ -256,7 +256,9 @@ def main(lims, args):
         if conc_ng_ul is not None and conc_ng_ul > 0:
             samples_with_conc += 1
 
-        all_samples.append((sample_name, source_well, dest_well, conc_ng_ul))
+        all_samples.append(
+            (inp_art.samples[0], sample_name, source_well, dest_well, conc_ng_ul)
+        )
 
     # Check if no samples have concentration and no blanket factor is set
     if total_samples > 0 and samples_with_conc == 0 and blanket_df is None:
@@ -268,13 +270,16 @@ def main(lims, args):
         )
 
     # Second pass: calculate volumes
-    for sample_name, source_well, dest_well, conc_ng_ul in all_samples:
-        sample_vol, eb_vol, used_default_df = calculate_volumes(
+    for sample, sample_name, source_well, dest_well, conc_ng_ul in all_samples:
+        sample_vol, eb_vol, dilution_factor, used_default_df = calculate_volumes(
             conc_ng_ul, target_conc, blanket_df, force_blanket
         )
 
         if used_default_df:
             samples_with_default_df.append(sample_name)
+
+        sample.udf["FA Dilution Fold"] = dilution_factor
+        sample.put()
 
         rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
 
