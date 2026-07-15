@@ -578,6 +578,7 @@ def norm(
     well_max_vol=180,  # TwinTec96
     # Input and output metrics
     use_customer_metrics=False,
+    allow_multi_plate=False,  # Allow up to 4 source plates; by default only one is allowed
     udfs={
         # Different steps may use different UDFs in different contexts
         # Here, ambiguity is eliminated within the script
@@ -673,13 +674,24 @@ def norm(
         df.loc[:, "vol"] = df.vol - well_dead_vol
 
         # Define deck
-        assert len(df.src_id.unique()) == 1, "Only one input plate allowed"
         assert len(df.dst_id.unique()) == 1, "Only one output plate allowed"
-        deck = {
-            df.src_name.unique()[0]: 2,
-            df.dst_name.unique()[0]: 3,
-            "buffer_plate": 4,
-        }
+        if allow_multi_plate:
+            assert len(df.src_id.unique()) <= 4, "Only one to four input plates allowed"
+            deck = {}
+            deck[df.dst_name.unique()[0]] = 3
+            available = [2, 4, 1, 5][: len(df.src_name.unique())]
+            for plate, pos in zip(df.src_name.unique(), available):
+                deck[plate] = pos
+            deck["buffer_plate"] = next(
+                p for p in [4, 1, 5, 6] if p not in deck.values()
+            )
+        else:
+            assert len(df.src_id.unique()) == 1, "Only one input plate allowed"
+            deck = {
+                df.src_name.unique()[0]: 2,
+                df.dst_name.unique()[0]: 3,
+                "buffer_plate": 4,
+            }
 
         # Make calculations
         df["target_conc"] = df.target_amt / df.target_vol
