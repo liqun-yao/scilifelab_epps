@@ -30,7 +30,10 @@ TIMESTAMP: str = dt.now().strftime("%y%m%d_%H%M%S")
 
 
 def assert_samplesheet(process: Process, args: Namespace, lims: Lims):
-    """Check that there isn't a loaded samplesheet that is contradicted by the step UDFs."""
+    """Check that there isn't a loaded samplesheet that is contradicted by the step UDFs.
+    
+    If skip_samplesheet_check is True, mismatches are logged as warnings instead of errors.
+    """
 
     # Get ONT samplesheet file artifact
     file_art: Artifact = [
@@ -54,12 +57,18 @@ def assert_samplesheet(process: Process, args: Namespace, lims: Lims):
 
     # Check step samplesheet is up-to-date with step UDFs
     if samplesheet_contents != new_samplesheet_contents:
-        logging.error(
+        error_msg = (
             f"The current sample sheet doesn't correspond to the current UDFs.\nCurrent sample sheet:\n{samplesheet_contents}\nNew sample sheet:\n{new_samplesheet_contents}"
         )
-        raise AssertionError(
-            "The current sample sheet doesn't correspond to the current UDFs."
-        )
+        if args.skip_samplesheet_check:
+            logging.info(error_msg)
+            logging.info("Proceeding despite samplesheet mismatch (--skip_samplesheet_check enabled).")
+            return True
+        else:
+            logging.error(error_msg)
+            raise AssertionError(
+                "The current sample sheet doesn't correspond to the current UDFs."
+            )
     else:
         logging.info("Samplesheet is up to date.")
         return True
@@ -294,6 +303,18 @@ if __name__ == "__main__":
         required=True,
         type=str,
         help="Which samplesheet file slot to use",
+    )
+    parser.add_argument(
+        "--skip_samplesheet_check",
+        action="store_true",
+        default=True,
+        help="Skip samplesheet validation; log warnings instead of errors on mismatch (default: True)",
+    )
+    parser.add_argument(
+        "--strict_samplesheet_check",
+        action="store_false",
+        dest="skip_samplesheet_check",
+        help="Enforce strict samplesheet validation; raise error on mismatch",
     )
     args: Namespace = parser.parse_args()
 
