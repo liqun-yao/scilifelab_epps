@@ -329,6 +329,7 @@ def set_sample_values(demux_process, parser_struct, process_stats):
         lane_reads = 0
         undet_lane_reads = 0
         samplesum = dict()
+        noIndex = False
 
         try:
             outarts_per_lane = []
