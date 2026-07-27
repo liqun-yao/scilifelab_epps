@@ -2,6 +2,10 @@
 
 ## 20260724.1
 
+Fix readscount deduplication and noIndex flag leaking across lanes. 
+
+## 20260724.1
+
 Fixing FA attachment files and handling decimal range values due to the FA software version update.
 
 ## 20260722.1
