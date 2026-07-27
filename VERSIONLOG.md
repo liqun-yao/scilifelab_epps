@@ -1,6 +1,6 @@
 # Scilifelab_epps Version Log
 
-## 20260724.1
+## 20260727.1
 
 Fix readscount deduplication and noIndex flag leaking across lanes. 
 
