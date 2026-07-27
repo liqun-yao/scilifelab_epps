@@ -2,7 +2,7 @@
 
 ## 20260727.1
 
-Fix readscount deduplication and no index flag leaking across lanes. 
+Fix demux stats noIndex flag leaking across lanes and readscount deduplication with artifact ID tiebreaker and lane correction detection.
 
 ## 20260724.1
 
