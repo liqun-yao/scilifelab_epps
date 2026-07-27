@@ -2,7 +2,7 @@
 
 ## 20260727.1
 
-Fix readscount deduplication and noIndex flag leaking across lanes. 
+Fix readscount deduplication and no index flag leaking across lanes. 
 
 ## 20260724.1
 
