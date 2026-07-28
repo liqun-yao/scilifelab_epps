@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20260727.1
+
+Fix demux stats noIndex flag leaking across lanes and readscount deduplication with artifact ID tiebreaker and lane correction detection.
+
 ## 20260724.1
 
 Fixing FA attachment files and handling decimal range values due to the FA software version update.
