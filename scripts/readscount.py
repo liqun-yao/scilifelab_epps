@@ -228,27 +228,16 @@ def sum_reads(sample, summary):
             existing_id_num = int(existing_art.id.split("-")[1])
             new_id_num = int(demux_art.id.split("-")[1])
 
-            should_replace = False
-            if new_date is not None and (
-                existing_date is None or new_date > existing_date
-            ):
-                should_replace = True
-            elif new_date == existing_date and new_id_num > existing_id_num:
+                        if (
+                new_date is not None
+                and (existing_date is None or new_date > existing_date)
+            ) or (new_date == existing_date and new_id_num > existing_id_num):
                 # Same date: use higher artifact ID (created more recently)
-                should_replace = True
-
-            if should_replace:
                 logging.info(
                     f"Found newer demux artifact for flowcell {flowcell_key}: "
                     f"replacing {existing_art.id} ({existing_date}) with {demux_art.id} ({new_date})"
                 )
                 demux_arts_deduplicated[flowcell_key] = (demux_art, demux_art_parent)
-            else:
-                logging.info(
-                    f"Skipping older demux artifact {demux_art.id} ({new_date}), "
-                    f"keeping {existing_art.id} ({existing_date})"
-                )
-
     if ongoing_demux_arts:
         ongoing_demux_steps_str = ", ".join(
             [
