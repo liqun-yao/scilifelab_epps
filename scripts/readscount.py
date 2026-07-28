@@ -189,27 +189,13 @@ def sum_reads(sample, summary):
                 f"Could not find any demultiplexing artifacts for sample {sample.name}."
             )
 
-    # Check for any ongoing demux steps
+    # Iterate across found demux artifacts to aggregate reads and collect flowcell information
+    # Check for ongoing demux steps and deduplicate by flowcell+lane, keeping only the latest demux step
     ongoing_demux_arts = []
+    demux_arts_deduplicated = {}  # key: (flowcell_id, lane), value: demux_artifact
     for demux_art in demux_arts:
         if demux_art.parent_process.date_run is None:
             ongoing_demux_arts.append(demux_art)
-    if ongoing_demux_arts:
-        ongoing_demux_steps_str = ", ".join(
-            [
-                f"'{art.parent_process.type.name}' ({art.parent_process.id})"
-                for art in ongoing_demux_arts
-            ]
-        )
-        logging.warning(
-            f"Sample {sample.name} has demux artifacts in ongoing steps:"
-            + f" {ongoing_demux_steps_str}. Finish them before proceeding."
-        )
-
-    # Iterate across found demux artifacts to aggregate reads and collect flowcell information
-    # First, deduplicate by flowcell+lane, keeping only the latest demux step
-    demux_arts_deduplicated = {}  # key: (flowcell_id, lane), value: demux_artifact
-    for demux_art in demux_arts:
         # Get flowcell and lane identifiers early for deduplication
         demux_art_parents = [
             parent
@@ -262,6 +248,18 @@ def sum_reads(sample, summary):
                     f"Skipping older demux artifact {demux_art.id} ({new_date}), "
                     f"keeping {existing_art.id} ({existing_date})"
                 )
+
+    if ongoing_demux_arts:
+        ongoing_demux_steps_str = ", ".join(
+            [
+                f"'{art.parent_process.type.name}' ({art.parent_process.id})"
+                for art in ongoing_demux_arts
+            ]
+        )
+        logging.warning(
+            f"Sample {sample.name} has demux artifacts in ongoing steps:"
+            + f" {ongoing_demux_steps_str}. Finish them before proceeding."
+        )
 
     logging.info(
         f"Deduplicated {len(demux_arts)} artifacts to {len(demux_arts_deduplicated)} "

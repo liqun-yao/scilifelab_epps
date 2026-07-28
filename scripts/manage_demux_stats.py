@@ -274,7 +274,6 @@ def set_sample_values(demux_process, parser_struct, process_stats):
     )
     failed_entries = 0
     undet_included = False
-    noIndex = False
     undet_lanes = list()
     proj_pattern = re.compile(r"(P\w+_\d+)")
 
