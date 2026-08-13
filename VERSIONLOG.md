@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20260813.1
+
+Added Illumina Trupath flowcells (C2 and C8) to the list of valid flowcells and give it a preliminary minimal yield requirement of 800M reads per lane (based on Illuminas specs).
+
 ## 20260727.1
 
 Fix demux stats noIndex flag leaking across lanes and readscount deduplication with artifact ID tiebreaker and lane correction detection.

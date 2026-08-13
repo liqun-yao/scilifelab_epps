@@ -40,6 +40,8 @@ class Thresholds:
             "10B",
             "1.5B",
             "25B",
+            "C2",
+            "C8",
             "AVITI High",
             "AVITI Med",
             "AVITI Low",
@@ -173,6 +175,11 @@ class Thresholds:
                 self.exp_lane_clust = 750e6
             elif self.chemistry == "25B":
                 self.exp_lane_clust = 3000e6
+            # Preliminary value for TruPath chemistry
+            elif self.chemistry == "C2":
+                self.exp_lane_clust = 800e6
+            elif self.chemistry == "C8":
+                self.exp_lane_clust = 800e6
         # Preliminary values for MiSeqi100
         elif self.instrument == "MiSeqi100":
             if self.chemistry == "5M":
