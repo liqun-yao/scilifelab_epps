@@ -57,7 +57,7 @@ class Thresholds:
         ):
             self.problem_handler(
                 "exit",
-                "Detected instrument and chemistry combination are not classed as valid in manage_demux_stats_thresholds.py",
+                f"Detected instrument ({instrument}) and chemistry ({chemistry}) combination are not classed as valid in manage_demux_stats_thresholds.py",
             )
         else:
             self.instrument = instrument
