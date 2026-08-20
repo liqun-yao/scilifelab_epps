@@ -276,7 +276,6 @@ def set_sample_values(demux_process, parser_struct, process_stats):
     undet_included = False
     undet_lanes = list()
     proj_pattern = re.compile(r"(P\w+_\d+)")
-    phix_stats_per_lane = {}  # Accumulate PhiX stats; written with a single put() after all lanes
 
     # Necessary for noindexruns, should always resolve
     try:
@@ -803,12 +802,10 @@ def set_sample_values(demux_process, parser_struct, process_stats):
             except ZeroDivisionError:
                 phix_pct = 0.0
 
-            udf_key = f"PhiX % Aligned Lane {lane_no}"
-            phix_stats_per_lane[udf_key] = (phix_pct, phix_clusters_total, phix_index_entries)
             logger.info(
                 f"Illumina Indexed PhiX in lane {lane_no}: "
                 f"{phix_clusters_total} clusters across {len(phix_index_entries)} index(es) "
-                f"({phix_pct}% of total lane reads). Will write to UDF '{udf_key}'."
+                f"({phix_pct}% of total lane reads)."
             )
             for entry in phix_index_entries:
                 cluster_key = "PF Clusters" if "PF Clusters" in entry else "Clusters"
@@ -854,18 +851,6 @@ def set_sample_values(demux_process, parser_struct, process_stats):
 
     if failed_entries > 0:
         problem_handler("warning", f"{failed_entries} entries failed automatic QC")
-
-    # Write all PhiX % Aligned UDFs with a single put()
-    if phix_stats_per_lane:
-        try:
-            for udf_key, (phix_pct, _, _) in phix_stats_per_lane.items():
-                demux_process.udf[udf_key] = phix_pct
-            demux_process.put()
-            logger.info(
-                f"PhiX % Aligned written for lanes: {list(phix_stats_per_lane.keys())}"
-            )
-        except Exception as e:
-            logger.warning(f"Could not write PhiX % Aligned UDFs to process: {e}")
 
 
 def write_demuxfile(process_stats, demux_id):
