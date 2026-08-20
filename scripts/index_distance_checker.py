@@ -231,12 +231,10 @@ def my_distance(idx_a, idx_b):
 def check_phix_collision(data):
     """Check if sample indexes collide with PhiX Indexed Control indexes.
 
-    For Model A (Targeted Use), PhiX Indexed Control should only be used for:
-    - Low index diversity pools (< 5 unique index combinations)
-    - Long-read chemistry (> 350 total cycles)
-
-    This function warns about potential collisions between sample indexes and
-    the 5 PhiX index pairs to help decide if Indexed PhiX can be safely used.
+    This check applies for both targeted (Model A) and universal (Model B)
+    deployment of Illumina Indexed PhiX. It warns about potential collisions
+    between sample indexes and the 5 PhiX index pairs to catch any risk of
+    demultiplexing cross-contamination before the run.
     """
     message = []
     pools = {x["pool"] for x in data}
@@ -503,7 +501,7 @@ def main(lims, pid, auto):
     else:
         message = check_index_distance(data)
 
-    # Always check for PhiX collisions (Model A: Targeted Use)
+    # Always check for PhiX collisions (applies for both Model A and Model B)
     phix_warnings = check_phix_collision(data)
     if phix_warnings:
         message += phix_warnings
