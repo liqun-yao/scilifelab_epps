@@ -409,9 +409,13 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                     if sample != "Undetermined":
                         try:
                             sample = proj_pattern.search(sample).group(0)
-                        # PhiX cases for AVITI
+                        # PhiX cases for AVITI and Illumina Indexed PhiX
                         except AttributeError:
                             pass
+
+                    # Skip Illumina Indexed PhiX control entries — handled separately below
+                    if entry["Sample"].startswith("PhiX-Index"):
+                        continue
 
                     if (
                         entry["Barcode sequence"] == "unknown"
@@ -775,6 +779,51 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                 problem_handler(
                     "exit",
                     f"Failed to apply artifact data to LIMS. Possibly due to data in laneBarcode.html; {str(e)}",
+                )
+
+        # Collect and log Illumina Indexed PhiX stats per lane (PhiX-Index1..5)
+        phix_clusters_total = 0
+        phix_index_entries = []
+        for entry in parser_struct:
+            if lane_no == entry["Lane"] and entry["Sample"].startswith("PhiX-Index"):
+                phix_index_entries.append(entry)
+                try:
+                    cluster_key = "PF Clusters" if "PF Clusters" in entry else "Clusters"
+                    phix_clusters_total += int(entry[cluster_key].replace(",", ""))
+                except (KeyError, ValueError):
+                    pass
+
+        if phix_index_entries:
+            total_lane_clusters = lane_reads + undet_lane_reads + phix_clusters_total
+            if process_stats["Paired"]:
+                total_lane_clusters = total_lane_clusters  # already in reads
+            try:
+                phix_pct = round(
+                    phix_clusters_total / total_lane_clusters * 100, 2
+                ) if total_lane_clusters > 0 else 0.0
+            except ZeroDivisionError:
+                phix_pct = 0.0
+
+            udf_key = f"PhiX % Aligned Lane {lane_no}"
+            try:
+                demux_process.udf[udf_key] = phix_pct
+                demux_process.put()
+                logger.info(
+                    f"Illumina Indexed PhiX in lane {lane_no}: "
+                    f"{phix_clusters_total} clusters across {len(phix_index_entries)} index(es) "
+                    f"({phix_pct}% of total lane reads). Written to UDF '{udf_key}'."
+                )
+                for entry in phix_index_entries:
+                    cluster_key = "PF Clusters" if "PF Clusters" in entry else "Clusters"
+                    idx_clusters = int(entry.get(cluster_key, "0").replace(",", ""))
+                    logger.info(
+                        f"  {entry['Sample']}: {idx_clusters} clusters, "
+                        f"Q30={entry.get('% >= Q30bases', 'N/A')}%, "
+                        f"PerfectBC={entry.get('% Perfectbarcode', 'N/A')}%"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Could not write PhiX % Aligned to process UDF for lane {lane_no}: {e}"
                 )
 
         # Counts undetermined per lane
