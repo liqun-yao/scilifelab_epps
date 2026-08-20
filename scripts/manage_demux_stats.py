@@ -276,6 +276,7 @@ def set_sample_values(demux_process, parser_struct, process_stats):
     undet_included = False
     undet_lanes = list()
     proj_pattern = re.compile(r"(P\w+_\d+)")
+    phix_stats_per_lane = {}  # Accumulate PhiX stats; written with a single put() after all lanes
 
     # Necessary for noindexruns, should always resolve
     try:
@@ -781,7 +782,7 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                     f"Failed to apply artifact data to LIMS. Possibly due to data in laneBarcode.html; {str(e)}",
                 )
 
-        # Collect and log Illumina Indexed PhiX stats per lane (PhiX-Index1..5)
+        # Collect Illumina Indexed PhiX stats per lane (PhiX-Index1..5)
         phix_clusters_total = 0
         phix_index_entries = []
         for entry in parser_struct:
@@ -795,8 +796,6 @@ def set_sample_values(demux_process, parser_struct, process_stats):
 
         if phix_index_entries:
             total_lane_clusters = lane_reads + undet_lane_reads + phix_clusters_total
-            if process_stats["Paired"]:
-                total_lane_clusters = total_lane_clusters  # already in reads
             try:
                 phix_pct = round(
                     phix_clusters_total / total_lane_clusters * 100, 2
@@ -805,25 +804,19 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                 phix_pct = 0.0
 
             udf_key = f"PhiX % Aligned Lane {lane_no}"
-            try:
-                demux_process.udf[udf_key] = phix_pct
-                demux_process.put()
+            phix_stats_per_lane[udf_key] = (phix_pct, phix_clusters_total, phix_index_entries)
+            logger.info(
+                f"Illumina Indexed PhiX in lane {lane_no}: "
+                f"{phix_clusters_total} clusters across {len(phix_index_entries)} index(es) "
+                f"({phix_pct}% of total lane reads). Will write to UDF '{udf_key}'."
+            )
+            for entry in phix_index_entries:
+                cluster_key = "PF Clusters" if "PF Clusters" in entry else "Clusters"
+                idx_clusters = int(entry.get(cluster_key, "0").replace(",", ""))
                 logger.info(
-                    f"Illumina Indexed PhiX in lane {lane_no}: "
-                    f"{phix_clusters_total} clusters across {len(phix_index_entries)} index(es) "
-                    f"({phix_pct}% of total lane reads). Written to UDF '{udf_key}'."
-                )
-                for entry in phix_index_entries:
-                    cluster_key = "PF Clusters" if "PF Clusters" in entry else "Clusters"
-                    idx_clusters = int(entry.get(cluster_key, "0").replace(",", ""))
-                    logger.info(
-                        f"  {entry['Sample']}: {idx_clusters} clusters, "
-                        f"Q30={entry.get('% >= Q30bases', 'N/A')}%, "
-                        f"PerfectBC={entry.get('% Perfectbarcode', 'N/A')}%"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"Could not write PhiX % Aligned to process UDF for lane {lane_no}: {e}"
+                    f"  {entry['Sample']}: {idx_clusters} clusters, "
+                    f"Q30={entry.get('% >= Q30bases', 'N/A')}%, "
+                    f"PerfectBC={entry.get('% Perfectbarcode', 'N/A')}%"
                 )
 
         # Counts undetermined per lane
@@ -861,6 +854,18 @@ def set_sample_values(demux_process, parser_struct, process_stats):
 
     if failed_entries > 0:
         problem_handler("warning", f"{failed_entries} entries failed automatic QC")
+
+    # Write all PhiX % Aligned UDFs with a single put()
+    if phix_stats_per_lane:
+        try:
+            for udf_key, (phix_pct, _, _) in phix_stats_per_lane.items():
+                demux_process.udf[udf_key] = phix_pct
+            demux_process.put()
+            logger.info(
+                f"PhiX % Aligned written for lanes: {list(phix_stats_per_lane.keys())}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not write PhiX % Aligned UDFs to process: {e}")
 
 
 def write_demuxfile(process_stats, demux_id):
