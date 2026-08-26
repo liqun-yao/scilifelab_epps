@@ -385,7 +385,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
         # Allow multiple source plates only for QIAseq miRNA
         is_qiaseq_mirna = zika.utils.verify_step(
             currentStep,
-            targets=[("QIAseq miRNA", "Setup Workset/Plate")],
+            targets=[("QIAseq miRNA", "")],
         )
         source_plates = {
             art_tuple[0]["uri"].location[0].id
