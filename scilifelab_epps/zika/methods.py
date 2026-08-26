@@ -578,7 +578,7 @@ def norm(
     well_max_vol=180,  # TwinTec96
     # Input and output metrics
     use_customer_metrics=False,
-    allow_multi_plate=False,  # Allow up to 4 source plates; by default only one is allowed
+    allow_multi_plate=False,  # Allow up to 3 source plates; by default only one is allowed
     udfs={
         # Different steps may use different UDFs in different contexts
         # Here, ambiguity is eliminated within the script
@@ -681,7 +681,7 @@ def norm(
             ].copy()
             for _, skipped_row in skipped.iterrows():
                 log.append(
-                    f"INFO: Skipping sample {skipped_row.sample_name} due to missing/insufficient source metrics "
+                    f"WARNING-SKIPPED: Sample {skipped_row.sample_name} skipped due to missing/insufficient source metrics "
                     f"(conc={skipped_row.conc}, vol={skipped_row.vol} uL, target_amt={skipped_row.target_amt}, target_vol={skipped_row.target_vol} uL; minimum required source volume is {well_dead_vol} uL)"
                 )
             df = df.loc[~invalid_rows].copy()
@@ -703,7 +703,9 @@ def norm(
         # Define deck
         assert len(df.dst_id.unique()) == 1, "Only one output plate allowed"
         if allow_multi_plate:
-            assert len(df.src_id.unique()) <= 4, "Only one to four input plates allowed"
+            assert len(df.src_id.unique()) <= 3, (
+                "Only one to three input plates allowed"
+            )
             deck = {}
             deck[df.dst_name.unique()[0]] = 3
             available = [2, 4, 1, 5][: len(df.src_name.unique())]
