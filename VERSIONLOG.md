@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20260826.1
+
+Clamp negative concentration UDF values to 0 before amount calculation in qc_amount_calculation.py, logging a warning for each affected sample.
+
 ## 20260813.1
 
 Added Illumina Trupath flowcells (C2 and C8) to the list of valid flowcells and give it a preliminary minimal yield requirement of 800M reads per lane (based on Illuminas specs).
