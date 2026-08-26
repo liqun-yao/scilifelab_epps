@@ -685,7 +685,7 @@ def norm(
             "No valid samples left after filtering missing/insufficient source metrics"
         )
 
-        conc_unit = "ng/ul" if use_customer_metrics else df.conc_units[0]
+        conc_unit = "ng/ul" if use_customer_metrics else df.conc_units.iloc[0]
         amt_unit = "ng" if conc_unit == "ng/ul" else "fmol"
 
         # Assertions
