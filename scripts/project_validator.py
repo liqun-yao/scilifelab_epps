@@ -14,11 +14,12 @@ Author: Chuan Wang, Science for Life Laboratory, Stockholm, Sweden
 
 # Pre-compile regexes in global scope:
 NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
-FIRST_SAMPLE_PAT = re.compile(r"_(1001|101)$")
+PLATE_PAT = re.compile(r"P(\d+)$")  # Extract plate number from project ID
 
 
 # Verify sample IDs
 def verify_sample_ids(lims, project):
+    """Validate project sample IDs for format, count, and sequence."""
     message = []
     
     # Get all samples in the project
@@ -55,18 +56,35 @@ def verify_sample_ids(lims, project):
             f"and customer sample names ({len(customer_names)})"
         )
 
-    # Check first sample numbering
-    if ngi_ids:
+    # Check first sample numbering based on plate number
+    plate_match = PLATE_PAT.search(project.id)
+    if plate_match and ngi_ids:
+        plate_num = plate_match.group(1)
         first_sample = ngi_ids[0]
-        if not FIRST_SAMPLE_PAT.search(first_sample):
+        expected_suffixes = f"_{plate_num}(001|01)$"
+        if not re.search(expected_suffixes, first_sample):
             message.append(
-                f"SAMPLE SEQUENCE WARNING: First sample {first_sample} should end with _1001 or _101"
+                f"SAMPLE SEQUENCE WARNING: First sample {first_sample} should end with _{plate_num}001 or _{plate_num}01"
             )
+
+    # Check for gaps in sample numbering
+    if ngi_ids:
+        try:
+            suffixes = sorted([int(s.split("_")[1]) for s in ngi_ids])
+            for curr, next_val in zip(suffixes, suffixes[1:]):
+                if next_val - curr != 1:
+                    message.append(
+                        f"SAMPLE SEQUENCE WARNING: Gap detected in sample numbering between {curr} and {next_val}. "
+                        f"Verify missing samples in the uploaded CSV file."
+                    )
+        except ValueError:
+            pass  # Skip gap detection if suffix extraction fails
 
     return message
 
 
 def main(lims, pid):
+    """Validate a project and exit with appropriate status code."""
     message = []
     project = Project(lims, id=pid)
 
