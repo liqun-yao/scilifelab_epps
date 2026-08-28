@@ -14,6 +14,9 @@ Author: Chuan Wang, Science for Life Laboratory, Stockholm, Sweden
 
 # Pre-compile regexes in global scope:
 NGISAMPLE_PAT = re.compile("P[0-9]+_[0-9]+")
+INDEX_PAT = re.compile(
+    r"^([ATGC]{6,24}(-[ATGC]{6,12})?|SI-[A-Z0-9]{2,4}-[A-Z]\d{1,2}|NB\d{2}|BC\d{2}|NoIndex)$"
+)
 
 
 # Verify sample IDs
@@ -103,6 +106,30 @@ def verify_sample_ids(lims, project):
     return message
 
 
+def verify_indexes(lims, project):
+    """Validate that all 4-digit samples have valid index formats."""
+    message = []
+
+    samples = lims.get_samples(projectname=project.name)
+    for sample in samples:
+        # Only validate 4-digit suffix samples (finished libraries)
+        suffix = sample.name.split("_")[1] if "_" in sample.name else ""
+        if len(suffix) == 4:
+            # Check if index exists and is valid
+            if not sample.artifact.reagent_labels:
+                message.append(f"INDEX WARNING: Sample {sample.name} has no index")
+            else:
+                index = sample.artifact.reagent_labels[0].strip()
+                if not index:
+                    message.append(f"INDEX WARNING: Sample {sample.name} has no index")
+                elif not INDEX_PAT.match(index):
+                    message.append(
+                        f"INDEX WARNING: Sample {sample.name} has invalid index '{index}'"
+                    )
+
+    return message
+
+
 def main(lims, pid):
     """Validate a project and exit with appropriate status code."""
     message = []
@@ -110,6 +137,9 @@ def main(lims, pid):
 
     # Validate sample IDs
     message += verify_sample_ids(lims, project)
+
+    # Validate indexes for finished libraries
+    message += verify_indexes(lims, project)
 
     if not message:
         print(f"No issue detected for project {pid}")
