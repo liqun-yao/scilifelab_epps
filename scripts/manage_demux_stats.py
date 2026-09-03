@@ -277,6 +277,15 @@ def set_sample_values(demux_process, parser_struct, process_stats):
     undet_lanes = list()
     proj_pattern = re.compile(r"(P\w+_\d+)")
 
+    def sample_base_id(sample_name):
+        if sample_name == "Undetermined":
+            return sample_name
+        match = proj_pattern.search(sample_name)
+        return match.group(0) if match else sample_name
+
+    def barcode_in_lims_name(barcode, lims_name):
+        return barcode.replace("+", "-") in lims_name
+
     # Necessary for noindexruns, should always resolve
     try:
         seq_processes = {
@@ -402,16 +411,35 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                     "exit",
                     f"Unable to determine sample name. Incorrect sample variable in process: {str(e)}",
                 )
+
+            lims_sample_name = current_name
+            current_name = sample_base_id(current_name)
+            matching_entries = [
+                entry
+                for entry in parser_struct
+                if entry["Lane"] == lane_no
+                and sample_base_id(entry["Sample"]) == current_name
+            ]
+            barcode_matches = [
+                entry
+                for entry in matching_entries
+                if barcode_in_lims_name(entry["Barcode sequence"], lims_sample_name)
+                or barcode_in_lims_name(entry["Barcode sequence"], target_file.name)
+            ]
+            if len(barcode_matches) == 1:
+                target_entry = barcode_matches[0]
+            elif len(matching_entries) == 1:
+                target_entry = matching_entries[0]
+            else:
+                problem_handler(
+                    "exit",
+                    f"Ambiguous demux entries for sample '{current_name}' in lane {lane_no}. "
+                    "The linked LIMS sample or output artifact name must include exactly one barcode sequence.",
+                )
+
             for entry in parser_struct:
                 if lane_no == entry["Lane"]:
-                    sample = entry["Sample"]
-                    # Finds name subset "P Anything Underscore Digits"
-                    if sample != "Undetermined":
-                        try:
-                            sample = proj_pattern.search(sample).group(0)
-                        # PhiX cases for AVITI
-                        except AttributeError:
-                            pass
+                    sample = sample_base_id(entry["Sample"])
 
                     if (
                         entry["Barcode sequence"] == "unknown"
@@ -466,13 +494,14 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                             )
 
                     # Bracket for adding typical sample info
-                    if sample == current_name:
+                    if entry is target_entry:
+                        sample_key = (sample, lane_no, entry["Barcode sequence"])
                         # Sample samplesum construction
-                        if sample not in samplesum:
-                            samplesum[sample] = dict()
-                            samplesum[sample]["count"] = 1
+                        if sample_key not in samplesum:
+                            samplesum[sample_key] = dict()
+                            samplesum[sample_key]["count"] = 1
                         else:
-                            samplesum[sample]["count"] += 1
+                            samplesum[sample_key]["count"] += 1
 
                         try:
                             def_atr = {
@@ -496,10 +525,11 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                                         else:
                                             default_value = 0.0
 
-                                        samplesum[sample][attr] = (
+                                        samplesum[sample_key][attr] = (
                                             default_value
-                                            if attr not in samplesum[sample]
-                                            else samplesum[sample][attr] + default_value
+                                            if attr not in samplesum[sample_key]
+                                            else samplesum[sample_key][attr]
+                                            + default_value
                                         )
                                         logger.info(
                                             f"{attr} field not found. Setting default value: {default_value}"
@@ -508,23 +538,23 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                                     else:
                                         # Yields needs division by 1K, is also non-percentage
                                         if old_attr == "Yield (Mbases)":
-                                            samplesum[sample][attr] = (
+                                            samplesum[sample_key][attr] = (
                                                 my_float(
                                                     entry[old_attr].replace(",", "")
                                                 )
                                                 / 1000
-                                                if attr not in samplesum[sample]
-                                                else samplesum[sample][attr]
+                                                if attr not in samplesum[sample_key]
+                                                else samplesum[sample_key][attr]
                                                 + my_float(
                                                     entry[old_attr].replace(",", "")
                                                 )
                                                 / 1000
                                             )
                                         else:
-                                            samplesum[sample][attr] = (
+                                            samplesum[sample_key][attr] = (
                                                 my_float(entry[old_attr])
-                                                if attr not in samplesum[sample]
-                                                else samplesum[sample][attr]
+                                                if attr not in samplesum[sample_key]
+                                                else samplesum[sample_key][attr]
                                                 + my_float(entry[old_attr])
                                             )
 
@@ -634,37 +664,37 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                                 basenumber = int(entry[clusterType].replace(",", ""))
                                 if process_stats["Paired"]:
                                     # Undet always 0 unless manually included
-                                    samplesum[sample]["# Reads"] = (
+                                    samplesum[sample_key]["# Reads"] = (
                                         basenumber * 2 + undet_reads
-                                        if "# Reads" not in samplesum[sample]
-                                        else samplesum[sample]["# Reads"]
+                                        if "# Reads" not in samplesum[sample_key]
+                                        else samplesum[sample_key]["# Reads"]
                                         + basenumber * 2
                                         + undet_reads
                                     )
 
-                                    samplesum[sample]["# Read Pairs"] = (
+                                    samplesum[sample_key]["# Read Pairs"] = (
                                         basenumber + undet_reads / 2
-                                        if "# Read Pairs" not in samplesum[sample]
-                                        else samplesum[sample]["# Read Pairs"]
+                                        if "# Read Pairs" not in samplesum[sample_key]
+                                        else samplesum[sample_key]["# Read Pairs"]
                                         + basenumber
                                         + undet_reads / 2
                                     )
                                 # Since a single ended run has no pairs, pairs is set to equal reads
                                 else:
                                     # Undet always 0 unless manually included
-                                    samplesum[sample]["# Reads"] = (
+                                    samplesum[sample_key]["# Reads"] = (
                                         basenumber + undet_reads
-                                        if "# Reads" not in samplesum[sample]
-                                        else samplesum[sample]["# Reads"]
+                                        if "# Reads" not in samplesum[sample_key]
+                                        else samplesum[sample_key]["# Reads"]
                                         + basenumber
                                         + undet_reads
                                     )
 
-                                    samplesum[sample]["# Read Pairs"] = (
-                                        samplesum[sample]["# Reads"]
-                                        if "# Read Pairs" not in samplesum[sample]
-                                        else samplesum[sample]["# Read Pairs"]
-                                        + samplesum[sample]["# Reads"]
+                                    samplesum[sample_key]["# Read Pairs"] = (
+                                        samplesum[sample_key]["# Reads"]
+                                        if "# Read Pairs" not in samplesum[sample_key]
+                                        else samplesum[sample_key]["# Read Pairs"]
+                                        + samplesum[sample_key]["# Reads"]
                                     )
                             except Exception as e:
                                 problem_handler(
@@ -674,11 +704,11 @@ def set_sample_values(demux_process, parser_struct, process_stats):
 
                         # Spools samplesum into samples
                         try:
-                            if samplesum[sample]["count"] > 1:
+                            if samplesum[sample_key]["count"] > 1:
                                 logger.info("Iteratively pooling samples in same lane.")
                             for thing in samplesum:
                                 for k, v in samplesum[thing].items():
-                                    if thing == sample and thing == current_name:
+                                    if thing == sample_key:
                                         if k == "count":
                                             logger.info(
                                                 f"Setting values for sample {thing} of lane {lane_no}"
@@ -697,7 +727,7 @@ def set_sample_values(demux_process, parser_struct, process_stats):
                                             )
                                         elif k != "count":
                                             target_file.udf[k] = samplesum[thing][k]
-                                        if samplesum[sample]["count"] > 1:
+                                        if samplesum[sample_key]["count"] > 1:
                                             logger.info(
                                                 f"Pooled total for {k} of sample {thing} is set to {v}"
                                             )
