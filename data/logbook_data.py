@@ -229,6 +229,12 @@ lims_process_record = {
     "Illumina DNA No-QC Library Pooling": {
         "lims_instrument": {"dest_file": "Mosquito", "details": ["Processname"]}
     },
+    "Load to Flowcell (MiSeq i100) v1.0": {
+        "udf_Instrument Used": {
+            "dest_file": "MiSeq i100",
+            "details": ["Flowcell Series Number", "Run Mode"],
+        }
+    },
     "Intermediate QC": {
         "lims_instrument": {
             "dest_file": "Qubit",
@@ -586,6 +592,7 @@ GDoc_logbook = {
     "CytAssist": {"File": "1sV0qefMAixVlnxGzB2q-YfcSl8a5Y69mAl555KfhU7Q"},
     "FragmentAnalyzer": {"File": "1T4Cy3ywZvl0-kQR-QbtXzu_sErPaYymXeGMf81fqK8k"},
     "MiSeq": {"File": "1ThnEbahwm3InlF_tUJ0riyT3RImVKQINfMD4rB6VThU"},
+    "MiSeq i100": {"File": "1Agbzg8M7U7HbMKCZr_LfL8XmENO5frnrTFz5TLxVxIg"},
     "Mosquito": {"File": "1ssFoSdcWV-CRK5TR--hObNkM42zJ8X3ED5q_YmU-m_o"},
     "PCR": {"File": "1YE_M4ywhr5HuQEV2DhO0oVLDPRkThhuAytAEawcdTZM"},
     "Pippin": {"File": "1cJd2Wo9GMVq0HjXrVahxF2o_I_LqIipAreWOXeWwObM"},
