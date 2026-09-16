@@ -111,11 +111,11 @@ lims_process_record = {
         "lims_instrument": {"dest_file": "Bravo", "details": ["Processname"]}
     },
     "CytAssist Probe release and Extension": {
-        "lims_instrument": {"dest_file": "CytAssist", "details": ["Processname"]},
-        "udf_PCR Machine": {"dest_file": "PCR"},
+        "udf_Instrument Used": {"dest_file": "CytAssist", "details": ["Processname"]},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Decrosslinking and/or Destaining": {
-        "lims_instrument": {"dest_file": "PCR"},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Denature, Dilute and Load Sample (MiSeq) 4.0": {
         "udf_Instrument Used": {
@@ -124,7 +124,7 @@ lims_process_record = {
         }
     },
     "Deparafinization, H&E, Tissue Imaging": {
-        "lims_instrument": {"dest_file": "PCR"},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Diluting Samples": {
         "lims_instrument": {
@@ -230,7 +230,7 @@ lims_process_record = {
         "lims_instrument": {"dest_file": "Mosquito", "details": ["Processname"]}
     },
     "Load to Flowcell (MiSeq i100) v1.0": {
-        "udf_Instrument Used": {
+        "lims_instrument": {
             "dest_file": "MiSeq i100",
             "details": ["Flowcell Series Number", "Run Mode"],
         }
@@ -372,7 +372,7 @@ lims_process_record = {
         },
     },
     "ONT PCR Barcoding": {
-        "lims_instrument": {
+        "udf_PCR Cycler": {
             "dest_file": "PCR",
         },
         "udf_Fragment Analyzer": {
@@ -422,6 +422,12 @@ lims_process_record = {
             "dest_file": ["Bravo", "Mosquito"],
             "details": ["Processname"],
         }
+    },
+    "Probe Hybridization and Ligation": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
+    "Probe-based Library Construction": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Pre-Pooling (AVITI) v1.0": {
         "lims_instrument": {
