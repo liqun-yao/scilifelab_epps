@@ -24,13 +24,6 @@ QPCR_DILUTION_VOLUME = 40
 Dilution_preset = {"Smarter pico": [1.25, 375.0, 10.0]}
 
 WATCHMAKER_TOTAL_VOL_UL = 50.0
-WATCHMAKER_INPUT_RULES = [
-    (2.5, 10.0, 1.0, 16, 18),
-    (11.0, 50.0, 1.0, 13, 15),
-    (51.0, 100.0, 1.0, 12, 13),
-    (101.0, 250.0, 1.0, 10, 12),
-    (251.0, 1000.0, 4.0, 8, 9),
-]
 
 # Pre-compile regexes in global scope:
 IDX_PAT = re.compile("([ATCG]{4,})-?([ATCG]*)")
@@ -381,38 +374,6 @@ def setup_qpcr(currentStep, lims):
         logging.info("Work done")
 
 
-def get_watchmaker_input_ng(amount_taken_from_plate):
-    if amount_taken_from_plate <= 0:
-        raise ValueError(
-            "Amount taken from plate (ng) must be > 0 for Watchmaker adapter/PCR calculation."
-        )
-    return amount_taken_from_plate
-
-
-def watchmaker_adapter_and_cycles(total_rna_input_ng):
-    for (
-        lower_ng,
-        upper_ng,
-        adapter_um,
-        min_cycles,
-        max_cycles,
-    ) in WATCHMAKER_INPUT_RULES:
-        if lower_ng <= total_rna_input_ng <= upper_ng:
-            if min_cycles == max_cycles or lower_ng == upper_ng:
-                return adapter_um, int(min_cycles)
-
-            # Lower RNA input should use more PCR cycles.
-            ratio = (total_rna_input_ng - lower_ng) / (upper_ng - lower_ng)
-            interpolated = max_cycles - ratio * (max_cycles - min_cycles)
-            cycles = int(interpolated + 0.5)
-            cycles = max(min_cycles, min(max_cycles, cycles))
-            return adapter_um, cycles
-
-    raise ValueError(
-        "Total RNA input is outside supported Watchmaker range (2.5-1000 ng)."
-    )
-
-
 def is_exact_workflow_step(current_step, workflow_name, step_name):
     analyte_inputs = [art for art in current_step.all_inputs() if art.type == "Analyte"]
     if not analyte_inputs:
@@ -500,6 +461,9 @@ def default_bravo(lims, currentStep, with_total_vol=True):
         checkTheLog = [False]
         dest_plate = []
         wrote_csv_rows = False
+        watchmaker_skipped_csv_count = 0
+        watchmaker_below_target_count = 0
+        watchmaker_summary_message = ""
         with open("bravo.csv", "w") as csvContext:
             with open("bravo.log", "w") as logContext:
                 # working directly with the map allows easier input/output handling
@@ -516,6 +480,10 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                         dest_fc_name = art_tuple[1]["uri"].location[0].name
                         dest_plate.append(dest_fc_name)
                         if with_total_vol:
+                            required_amount_for_prep = float(
+                                art_tuple[1]["uri"].udf.get("Amount for prep (ng)", 0)
+                                or 0
+                            )
                             if is_watchmaker_setup:
                                 art_tuple[1]["uri"].udf["Total Volume (uL)"] = (
                                     WATCHMAKER_TOTAL_VOL_UL
@@ -547,30 +515,20 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                             art_tuple[1]["uri"].samples[0].name
                                         )
                                     )
+                                    watchmaker_skipped_csv_count += 1
                                     checkTheLog[0] = prev_check_state
                                     continue
 
                                 # Update Amount for prep (ng), Total Volume (uL) and Amount taken from plate (ng) in LIMS
                                 if not has_calc_error:
-                                    adapter_um = pcr_cycles = input_ng = None
                                     if is_watchmaker_setup:
-                                        input_ng = get_watchmaker_input_ng(
-                                            float(amount_taken_from_plate)
-                                        )
-                                        try:
-                                            (adapter_um, pcr_cycles) = (
-                                                watchmaker_adapter_and_cycles(input_ng)
-                                            )
-                                        except ValueError as e:
-                                            logContext.write(
-                                                "WARN : Sample {} skipped due to unsupported RNA input {} ng ({}).\n".format(
-                                                    art_tuple[1]["uri"].samples[0].name,
-                                                    input_ng,
-                                                    e,
-                                                )
-                                            )
-                                            checkTheLog[0] = prev_check_state
-                                            continue
+                                        achieved_amount = float(amount_taken_from_plate)
+                                        if (
+                                            required_amount_for_prep > 0
+                                            and achieved_amount
+                                            < required_amount_for_prep
+                                        ):
+                                            watchmaker_below_target_count += 1
 
                                     art_tuple[1]["uri"].udf["Amount for prep (ng)"] = (
                                         float(amount_for_prep)
@@ -581,24 +539,8 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                     art_tuple[1]["uri"].udf[
                                         "Amount taken from plate (ng)"
                                     ] = float(amount_taken_from_plate)
-                                    if is_watchmaker_setup:
-                                        art_tuple[1]["uri"].udf[
-                                            "Adapter Concentration (µM)"
-                                        ] = float(adapter_um)
-                                        art_tuple[1]["uri"].udf["PCR Cycles"] = int(
-                                            pcr_cycles
-                                        )
 
                                     art_tuple[1]["uri"].put()
-                                    if is_watchmaker_setup:
-                                        logContext.write(
-                                            "INFO : Sample {} uses {:.2f}ng RNA input, adapter {}uM, PCR cycles {}.\n".format(
-                                                art_tuple[1]["uri"].samples[0].name,
-                                                input_ng,
-                                                adapter_um,
-                                                pcr_cycles,
-                                            )
-                                        )
                                 csvContext.write(
                                     f"{source_fc},{source_well},{volume},{dest_fc},{dest_well},{final_volume}\n"
                                 )
@@ -623,6 +565,21 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                 f"{source_fc},{source_well},{volume},{dest_fc},{dest_well}\n"
                             )
                             wrote_csv_rows = True
+
+                if is_watchmaker_setup and (
+                    watchmaker_below_target_count > 0
+                    or watchmaker_skipped_csv_count > 0
+                ):
+                    watchmaker_summary_message = (
+                        "WARNING: Watchmaker summary: "
+                        f"{watchmaker_below_target_count} sample(s) did not reach required Amount for prep (ng); "
+                        f"{watchmaker_skipped_csv_count} sample(s) were skipped from Bravo CSV due to missing concentration/volume data. "
+                        "Please check the Log file for detailed information."
+                    )
+                    logContext.write(watchmaker_summary_message + "\n")
+
+        if watchmaker_summary_message:
+            sys.stderr.write(watchmaker_summary_message + "\n")
 
         if is_watchmaker_setup and not wrote_csv_rows:
             sys.stderr.write("No valid samples available for Bravo CSV generation\n")
