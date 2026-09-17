@@ -491,7 +491,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                             if art_tuple[1]["uri"].udf.get("Total Volume (uL)"):
                                 prev_check_state = checkTheLog[0]
                                 (
-                                    art_workflows,
+                                    _,
                                     volume,
                                     final_volume,
                                     amount_for_prep,
@@ -554,7 +554,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                 checkTheLog[0] = True
                         else:
                             (
-                                art_workflows,
+                                _,
                                 volume,
                                 final_volume,
                                 amount_for_prep,
