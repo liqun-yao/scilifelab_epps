@@ -571,10 +571,15 @@ def default_bravo(lims, currentStep, with_total_vol=True):
         udf_instrument_name = (currentStep.udf.get("Instrument Used") or "").strip()
         instrument_name = (getattr(currentStep.instrument, "name", "") or "").strip()
         effective_instrument_name = udf_instrument_name or instrument_name
-        if "bravo" not in effective_instrument_name.casefold():
+        allowed_instrument_keywords = ("bender", "hal", "ash", "marvin")
+        instrument_name_lc = effective_instrument_name.casefold()
+        if not any(
+            keyword in instrument_name_lc for keyword in allowed_instrument_keywords
+        ):
             sys.stderr.write(
-                "Watchmaker mRNA Setup Workset/Plate must run on an instrument containing 'Bravo' in its name. "
-                f"Detected instrument: '{effective_instrument_name or 'UNKNOWN'}'. Please select the correct Bravo instrument and retry.\n"
+                "Watchmaker mRNA Setup Workset/Plate must run on a valid Watchmaker instrument "
+                "(Bender, HAL, Ash, or Marvin). "
+                f"Detected instrument: '{effective_instrument_name or 'UNKNOWN'}'. Please select the correct instrument and retry.\n"
             )
             sys.exit(2)
         _watchmaker_setup_workset_plate(lims, currentStep)
