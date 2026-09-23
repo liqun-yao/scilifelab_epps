@@ -568,9 +568,13 @@ def setup_qpcr(currentStep, lims):
 
 def default_bravo(lims, currentStep, with_total_vol=True):
     if _is_watchmaker_setup_workset_plate(currentStep):
-        if "Bravo" not in (currentStep.instrument.name or ""):
+        udf_instrument_name = (currentStep.udf.get("Instrument Used") or "").strip()
+        instrument_name = (getattr(currentStep.instrument, "name", "") or "").strip()
+        effective_instrument_name = udf_instrument_name or instrument_name
+        if "bravo" not in effective_instrument_name.casefold():
             sys.stderr.write(
-                "Watchmaker mRNA Setup Workset/Plate must run on an instrument containing 'Bravo' in its name. Please select the correct Bravo instrument and retry.\n"
+                "Watchmaker mRNA Setup Workset/Plate must run on an instrument containing 'Bravo' in its name. "
+                f"Detected instrument: '{effective_instrument_name or 'UNKNOWN'}'. Please select the correct Bravo instrument and retry.\n"
             )
             sys.exit(2)
         _watchmaker_setup_workset_plate(lims, currentStep)
