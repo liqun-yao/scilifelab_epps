@@ -624,7 +624,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
             keyword in instrument_name_lc for keyword in allowed_instrument_keywords
         ):
             sys.stderr.write(
-                "Watchmaker mRNA Setup Workset/Plate must run on a valid Watchmaker instrument "
+                "Watchmaker mRNA Setup Workset/Plate must run on a valid Bravo instrument "
                 "(Bender, HAL, Ash, or Marvin). "
                 f"Detected instrument: '{effective_instrument_name or 'UNKNOWN'}'. Please select the correct instrument and retry.\n"
             )
