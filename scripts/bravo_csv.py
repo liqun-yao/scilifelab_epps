@@ -211,7 +211,7 @@ def _watchmaker_setup_workset_plate(lims, currentStep):
         f"low concentration warnings={low_conc_count}; "
         f"skipped due to high concentration={skipped_high_conc_count}; "
         "skipped due to missing/invalid concentration-volume metrics="
-        f"{skipped_missing_info_count}."
+        f"{skipped_missing_info_count}. Please check Bravo Log file for details."
     )
 
     with open("bravo.log", "w") as logContext:
