@@ -206,6 +206,13 @@ def _watchmaker_setup_workset_plate(lims, currentStep):
         "Samples skipped due to missing/invalid concentration-volume metrics: "
         f"{skipped_missing_info_count}"
     )
+    watchmaker_summary_single_line = (
+        "Watchmaker Summary: "
+        f"low concentration warnings={low_conc_count}; "
+        f"skipped due to high concentration={skipped_high_conc_count}; "
+        "skipped due to missing/invalid concentration-volume metrics="
+        f"{skipped_missing_info_count}."
+    )
 
     with open("bravo.log", "w") as logContext:
         logContext.write("\n".join(log_lines) + "\n")
@@ -219,6 +226,7 @@ def _watchmaker_setup_workset_plate(lims, currentStep):
         sys.stderr.write(
             "No valid Watchmaker samples remain after applying skip rules. Please check Bravo Log file for details.\n"
             f"{watchmaker_summary_text}\n"
+            f"{watchmaker_summary_single_line}\n"
         )
         sys.exit(2)
 
@@ -254,6 +262,7 @@ def _watchmaker_setup_workset_plate(lims, currentStep):
         sys.stderr.write(
             "Watchmaker setup completed with warnings/skipped samples. Please check Bravo Log file for details.\n"
             f"{watchmaker_summary_text}\n"
+            f"{watchmaker_summary_single_line}\n"
         )
         sys.exit(2)
     else:
