@@ -23,8 +23,6 @@ QPCR_DILUTION_VOLUME = 40
 # Three values are minimum required conc for setup workset, maximum conc for dilution and minimum volume for dilution
 Dilution_preset = {"Smarter pico": [1.25, 375.0, 10.0]}
 
-WATCHMAKER_TOTAL_VOL_UL = 50.0
-
 # Pre-compile regexes in global scope:
 IDX_PAT = re.compile("([ATCG]{4,})-?([ATCG]*)")
 TENX_PAT = re.compile("SI-GA-[A-H][1-9][0-2]?")
@@ -568,33 +566,15 @@ def setup_qpcr(currentStep, lims):
         logging.info("Work done")
 
 
-def is_exact_workflow_step(current_step, workflow_name, step_name):
-    analyte_inputs = [art for art in current_step.all_inputs() if art.type == "Analyte"]
-    if not analyte_inputs:
-        return False
-
-    for art in analyte_inputs:
-        active_stages = [
-            stage_tuple
-            for stage_tuple in art.workflow_stages_and_statuses
-            if stage_tuple[1] == "IN_PROGRESS"
-        ]
-        if not any(
-            active_stage[0].workflow.name == workflow_name
-            and active_stage[2] == step_name
-            for active_stage in active_stages
-        ):
-            return False
-
-    return True
-
-
 def default_bravo(lims, currentStep, with_total_vol=True):
-    is_watchmaker_setup = is_exact_workflow_step(
-        currentStep,
-        workflow_name="Watchmaker mRNA",
-        step_name="Setup Workset/Plate",
-    )
+    if _is_watchmaker_setup_workset_plate(currentStep):
+        if currentStep.instrument.name != "Bravo":
+            sys.stderr.write(
+                "Watchmaker mRNA Setup Workset/Plate must run on Bravo. Please select Bravo as instrument and retry.\n"
+            )
+            sys.exit(2)
+        _watchmaker_setup_workset_plate(lims, currentStep)
+        return
 
     # Re-route to Zika
     if zika.utils.verify_step(
@@ -654,10 +634,6 @@ def default_bravo(lims, currentStep, with_total_vol=True):
     else:
         checkTheLog = [False]
         dest_plate = []
-        wrote_csv_rows = False
-        watchmaker_skipped_csv_count = 0
-        watchmaker_below_target_count = 0
-        watchmaker_summary_message = ""
         with open("bravo.csv", "w") as csvContext:
             with open("bravo.log", "w") as logContext:
                 # working directly with the map allows easier input/output handling
@@ -674,25 +650,17 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                         dest_fc_name = art_tuple[1]["uri"].location[0].name
                         dest_plate.append(dest_fc_name)
                         if with_total_vol:
-                            required_amount_for_prep = float(
-                                art_tuple[1]["uri"].udf.get("Amount for prep (ng)", 0)
-                                or 0
-                            )
-                            if is_watchmaker_setup:
-                                art_tuple[1]["uri"].udf["Total Volume (uL)"] = (
-                                    WATCHMAKER_TOTAL_VOL_UL
-                                )
                             if art_tuple[1]["uri"].udf.get("Total Volume (uL)"):
-                                prev_check_state = checkTheLog[0]
                                 (
-                                    _,
+                                    art_workflows,
                                     volume,
                                     final_volume,
                                     amount_for_prep,
                                     amount_taken_from_plate,
                                     total_volume,
                                 ) = calc_vol(art_tuple, logContext, checkTheLog)
-                                has_calc_error = any(
+                                # Update Amount for prep (ng), Total Volume (uL) and Amount taken from plate (ng) in LIMS
+                                if not any(
                                     x == "#ERROR#"
                                     for x in [
                                         volume,
@@ -701,29 +669,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                         amount_taken_from_plate,
                                         total_volume,
                                     ]
-                                )
-
-                                if is_watchmaker_setup and has_calc_error:
-                                    logContext.write(
-                                        "WARN : Sample {} skipped because concentration and/or volume information is missing for amount calculation.\n".format(
-                                            art_tuple[1]["uri"].samples[0].name
-                                        )
-                                    )
-                                    watchmaker_skipped_csv_count += 1
-                                    checkTheLog[0] = prev_check_state
-                                    continue
-
-                                # Update Amount for prep (ng), Total Volume (uL) and Amount taken from plate (ng) in LIMS
-                                if not has_calc_error:
-                                    if is_watchmaker_setup:
-                                        achieved_amount = float(amount_taken_from_plate)
-                                        if (
-                                            required_amount_for_prep > 0
-                                            and achieved_amount
-                                            < required_amount_for_prep
-                                        ):
-                                            watchmaker_below_target_count += 1
-
+                                ):
                                     art_tuple[1]["uri"].udf["Amount for prep (ng)"] = (
                                         float(amount_for_prep)
                                     )
@@ -733,12 +679,10 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                     art_tuple[1]["uri"].udf[
                                         "Amount taken from plate (ng)"
                                     ] = float(amount_taken_from_plate)
-
                                     art_tuple[1]["uri"].put()
                                 csvContext.write(
                                     f"{source_fc},{source_well},{volume},{dest_fc},{dest_well},{final_volume}\n"
                                 )
-                                wrote_csv_rows = True
                             else:
                                 logContext.write(
                                     "No Total Volume found for sample {}\n".format(
@@ -748,7 +692,7 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                                 checkTheLog[0] = True
                         else:
                             (
-                                _,
+                                art_workflows,
                                 volume,
                                 final_volume,
                                 amount_for_prep,
@@ -758,26 +702,6 @@ def default_bravo(lims, currentStep, with_total_vol=True):
                             csvContext.write(
                                 f"{source_fc},{source_well},{volume},{dest_fc},{dest_well}\n"
                             )
-                            wrote_csv_rows = True
-
-                if is_watchmaker_setup and (
-                    watchmaker_below_target_count > 0
-                    or watchmaker_skipped_csv_count > 0
-                ):
-                    watchmaker_summary_message = (
-                        "WARNING: Watchmaker summary: "
-                        f"{watchmaker_below_target_count} sample(s) did not reach required Amount for prep (ng); "
-                        f"{watchmaker_skipped_csv_count} sample(s) were skipped from Bravo CSV due to missing concentration/volume data. "
-                        "Please check the Log file for detailed information."
-                    )
-                    logContext.write(watchmaker_summary_message + "\n")
-
-        if watchmaker_summary_message:
-            sys.stderr.write(watchmaker_summary_message + "\n")
-
-        if is_watchmaker_setup and not wrote_csv_rows:
-            sys.stderr.write("No valid samples available for Bravo CSV generation\n")
-            sys.exit(2)
 
         df = pd.read_csv("bravo.csv", header=None)
         df["dest_row"] = df.apply(lambda row: row[4].split(":")[0], axis=1)
