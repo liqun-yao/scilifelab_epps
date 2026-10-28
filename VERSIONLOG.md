@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20261028.1
+
+Fix MinKNOW samplesheet generation for single-sample libraries with ONT barcodes, and remove false lane-correction error in readscount when lanes of a flowcell are demultiplexed in separate steps.
+
 ## 20261006.1
 
 Fix to support flag-only Aggregate QC workflows and update logbook PCR mappings.

@@ -151,6 +151,9 @@ def main(args):
 def sum_reads(sample, summary):
     """For a given submitted sample and a summary object,
     calculate the total number of reads and append to the summary.
+
+    Lanes of a flowcell may be processed in separate demultiplexing steps.
+    Count only the latest demultiplexing result for each flowcell and lane.
     """
 
     logging.info(f"Aggregating reads of sample '{sample.name}'...")
@@ -260,33 +263,6 @@ def sum_reads(sample, summary):
         f"Deduplicated {len(demux_arts)} artifacts to {len(demux_arts_deduplicated)} "
         f"(keeping only latest per flowcell+lane)"
     )
-
-    # Check for lane corrections (sample moved between lanes in different demux steps of same flowcell)
-    flowcell_to_demux_steps = {}  # key: flowcell_id, value: {demux_step_id: set(lanes)}
-    for (flowcell_id, lane), (demux_art, _) in demux_arts_deduplicated.items():
-        if flowcell_id not in flowcell_to_demux_steps:
-            flowcell_to_demux_steps[flowcell_id] = {}
-        demux_step_id = demux_art.parent_process.id
-        if demux_step_id not in flowcell_to_demux_steps[flowcell_id]:
-            flowcell_to_demux_steps[flowcell_id][demux_step_id] = set()
-        flowcell_to_demux_steps[flowcell_id][demux_step_id].add(lane)
-
-    for flowcell_id, demux_steps in flowcell_to_demux_steps.items():
-        if len(demux_steps) > 1 and "ONT" not in str(
-            demux_steps
-        ):  # Multiple demux steps
-            all_lanes_across_steps = [lanes for lanes in demux_steps.values()]
-            if len(all_lanes_across_steps) > 1:
-                lanes_step1 = all_lanes_across_steps[0]
-                lanes_step2 = all_lanes_across_steps[1]
-                if lanes_step1 != lanes_step2:
-                    raise ValueError(
-                        f"ERROR: Sample '{sample.name}' appears in different lanes "
-                        f"across demux steps of flowcell '{flowcell_id}': "
-                        f"{dict(demux_steps)}. "
-                        f"This indicates a lane correction in LIMS. "
-                        f"Please verify the values and correct them manually if needed."
-                    )
 
     tot_reads = 0
     flowcell_lane_list = []

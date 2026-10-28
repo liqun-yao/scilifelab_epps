@@ -30,15 +30,11 @@ def get_ont_library_contents(
 ) -> pd.DataFrame:
     """For an ONT sequencing library, compile a dataframe with sample-level information.
 
-    Will backtrack the library to previous ONT pooling step (if any) to elucidate
-    sample and index information and decide whether to demultiplex at the level of
-    ONT barcodes, Illumina indices, both or neither.
+    Retrieve sample information and map samples to their ONT reagent labels
+    for barcoded libraries. Barcoded libraries may contain a single sample or
+    multiple samples.
 
     """
-
-    # Link samples to reagent_labels via database queries, if applicable
-    if len(ont_library.reagent_labels) > 0:
-        sample2label = get_pool_sample_label_mapping(ont_library)
 
     logging.info(
         f"Compiling sample-level information for library '{ont_library.name}'..."
@@ -48,8 +44,8 @@ def get_ont_library_contents(
     # Instantiate list to collect dataframe rows
     rows = []
 
-    # See if library can be backtracked to an ONT pooling step
-    if len(ont_library.samples) > 1:
+    if len(ont_library.reagent_labels) > 0 or len(ont_library.samples) > 1:
+        sample2label = get_pool_sample_label_mapping(ont_library)
         library_contents_msg += f"\n - '{ont_library.name}': ONT-barcoded pool"
 
         for ont_sample in ont_library.samples:
@@ -171,8 +167,6 @@ def generate_MinKNOW_samplesheet(process):
     for ont_library in ont_libraries:
         # In case of errors, skip to next artifact
         try:
-            # Perform sample-level demultiplexing on the library
-            # i.e. if the ONT pooling inputs consist of Illumina pools
             library_df = get_ont_library_contents(
                 ont_library=ont_library,
                 list_contents=True,
