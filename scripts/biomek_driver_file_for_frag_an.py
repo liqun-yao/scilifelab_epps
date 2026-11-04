@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 
+import os
 import sys
 from argparse import ArgumentParser
+from datetime import datetime as dt
 
 from genologics.config import BASEURI, PASSWORD, USERNAME
 from genologics.entities import Process
 from genologics.lims import Lims
 
-DESC = """EPP used to create a dilution CSV file to drive the fragment analyzer.
+DESC = """EPP used to create a Biomek driver CSV file for Fragment Analyzer dilutions.
 
-The CSV filename includes the instrument name (fergie or fatboy).
+The CSV filename includes the instrument name (Fergie or Fatboy).
 Per-sample dilution volumes are calculated from prior quantification (Qubit /
 Quant-IT) stored on the input artifacts.  If no concentration is available, a
 blanket dilution factor set on the step UDF is used instead.
@@ -64,7 +66,7 @@ def _get_latest_ngul_measurement(inp_art):
     supported mass unit, then returns the value from the most recent process
     (sorted by the numeric part of the process ID).
 
-    Returns (conc_ng_ul, None) on success, or (None, warning_str) on failure.
+    Returns concentration, source description and a warning, if applicable.
     """
     sample_id = inp_art.samples[0].id
     sample_name = inp_art.samples[0].name
@@ -81,8 +83,12 @@ def _get_latest_ngul_measurement(inp_art):
             candidates.append(rf)
 
     if not candidates:
-        return None, (
-            f"No ng/uL Quant-iT or Plate Reader measurement found for '{sample_name}'."
+        return (
+            None,
+            None,
+            (
+                f"No ng/uL Quant-iT or Plate Reader measurement found for '{sample_name}'."
+            ),
         )
 
     # Most recent process has the highest numeric ID
@@ -92,48 +98,69 @@ def _get_latest_ngul_measurement(inp_art):
     latest = candidates[0]
     conc = float(latest.udf["Concentration"])
     units = _get_conc_units(latest.udf)
-    return _to_ng_ul(conc, units), None
+    source = f"{latest.name} ({latest.parent_process.id})"
+    return _to_ng_ul(conc, units), source, None
 
 
 def get_concentration(inp_art):
-    """Return (conc_ng_ul, warning_str) for an input artifact.
+    """Return concentration, source description and a warning, if applicable.
 
     Concentration is sourced in the following priority order:
       1. 'Final Concentration' UDF, when the parent step is 'Diluting Samples'.
       2. The most recent Quant-iT or Plate Reader measurement ResultFile (ng/uL).
       3. 'Concentration' UDF on the current artifact, if in a supported mass unit.
 
-    Returns (None, message) when no usable value is found.
+    Returns (None, None, message) when no usable value is found.
     """
     try:
         try:
             if inp_art.parent_process.type.name == "Diluting Samples":
                 conc = float(inp_art.udf["Final Concentration"])
                 units = _get_conc_units(inp_art.udf)
-                return _to_ng_ul(conc, units), None
+                return _to_ng_ul(conc, units), "Final Concentration UDF", None
         except AttributeError:
             pass
 
         # Priority 1: latest ng/uL measurement ResultFile (Quant-iT / Plate Reader)
-        conc_ng_ul, _ = _get_latest_ngul_measurement(inp_art)
+        conc_ng_ul, source, _ = _get_latest_ngul_measurement(inp_art)
         if conc_ng_ul is not None:
-            return conc_ng_ul, None
+            return conc_ng_ul, source, None
 
         # Priority 2: concentration on the current artifact (mass unit only)
         if "Concentration" in inp_art.udf:
             conc = float(inp_art.udf["Concentration"])
             units = _get_conc_units(inp_art.udf)
             if units in SUPPORTED_MASS_UNITS:
-                return _to_ng_ul(conc, units), None
+                return _to_ng_ul(conc, units), "input artifact Concentration UDF", None
 
-        return None, (
-            f"No ng/uL concentration found for sample '{inp_art.samples[0].name}'."
+        return (
+            None,
+            None,
+            (f"No ng/uL concentration found for sample '{inp_art.samples[0].name}'."),
         )
 
     except Exception as e:
-        return None, (
-            f"Could not read concentration for '{inp_art.samples[0].name}': {e}"
+        return (
+            None,
+            None,
+            (f"Could not read concentration for '{inp_art.samples[0].name}': {e}"),
         )
+
+
+def upload_run_log(lims, log_artifact, process_id, log_entries):
+    """Replace the Biomek Driver Log artifact's file with this run's log."""
+    timestamp = dt.now().strftime("%y%m%d_%H%M%S")
+    filename = f"biomek_driver_log_{process_id}_{timestamp}.txt"
+    try:
+        with open(filename, "w") as log_file:
+            log_file.write("\n".join(log_entries) + "\n")
+
+        for existing_file in log_artifact.files:
+            lims.request_session.delete(existing_file.uri)
+        lims.upload_new_file(log_artifact, filename)
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
 
 
 def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=False):
@@ -188,10 +215,27 @@ def get_fatboy_ladder_well(rows):
 
 def main(lims, args):
     currentStep = Process(lims, id=args.pid)
+    biomek_driver_file_out = None
+    biomek_driver_log_out = None
+    for output in currentStep.all_outputs():
+        if output.name == "Biomek Driver File":
+            biomek_driver_file_out = output
+        elif output.name == "Biomek Driver Log":
+            biomek_driver_log_out = output
+
+    if biomek_driver_log_out is None:
+        sys.exit("ERROR: No 'Biomek Driver Log' output artifact found in this step.")
+
+    log_entries = [f"Step: {currentStep.id}"]
+
+    def fail(message):
+        log_entries.append(f"ERROR: {message}")
+        upload_run_log(lims, biomek_driver_log_out, currentStep.id, log_entries)
+        sys.exit(message)
 
     # --- Required: instrument name ---
     if currentStep.instrument is None:
-        sys.exit("ERROR: No instrument is selected on the step.")
+        fail("No instrument is selected on the step.")
     instrument_name = currentStep.instrument.name
 
     if "fatboy" in instrument_name.lower():
@@ -199,10 +243,11 @@ def main(lims, args):
     elif "fergie" in instrument_name.lower():
         instrument = "fergie"
     else:
-        sys.exit(
-            f"ERROR: Could not determine instrument from step instrument "
+        fail(
+            f"Could not determine instrument from step instrument "
             f"'{instrument_name}'. Expected a name containing 'Fatboy' or 'Fergie'."
         )
+    log_entries.append(f"Instrument: {instrument_name}")
 
     # --- Optional: analysis type (dropdown) ---
     if "Analysis Type" in currentStep.udf:
@@ -211,11 +256,12 @@ def main(lims, args):
         analysis_type = DEFAULT_ANALYSIS_TYPE
 
     if analysis_type not in ANALYSIS_TYPES:
-        sys.exit(
-            f"ERROR: Unknown Analysis Type '{analysis_type}'. "
+        fail(
+            f"Unknown Analysis Type '{analysis_type}'. "
             f"Valid values: {list(ANALYSIS_TYPES.keys())}"
         )
     target_conc = ANALYSIS_TYPES[analysis_type]
+    log_entries.append(f"Analysis type: {analysis_type}; target: {target_conc} ng/uL")
 
     # --- Optional: blanket dilution factor and force flag ---
     blanket_df = None
@@ -227,20 +273,16 @@ def main(lims, args):
         force_blanket = currentStep.udf["Force Blanket Dilution"] == "Yes"
 
     if force_blanket and blanket_df is None:
-        sys.exit(
-            "ERROR: 'Force Blanket Dilution' is checked but "
-            "'Blanket Dilution Factor' is not set."
+        fail(
+            "'Force Blanket Dilution' is Yes but 'Blanket Dilution Factor' is not set."
         )
+    log_entries.append(
+        f"Force blanket dilution: {force_blanket}; blanket factor: {blanket_df}"
+    )
 
     # --- Locate the Driver File output artifact ---
-    driver_file_out = None
-    for output in currentStep.all_outputs():
-        if output.name == "Driver File":
-            driver_file_out = output
-            break
-
-    if driver_file_out is None:
-        sys.exit("ERROR: No 'Driver File' output artifact found in this step.")
+    if biomek_driver_file_out is None:
+        fail("No 'Biomek Driver File' output artifact found in this step.")
 
     # --- Build dilution rows from input-output maps ---
     rows = []
@@ -268,26 +310,37 @@ def main(lims, args):
 
         if force_blanket:
             conc_ng_ul = None
+            conc_source = None
         else:
-            conc_ng_ul, warn = get_concentration(inp_art)
+            conc_ng_ul, conc_source, warn = get_concentration(inp_art)
             if warn:
                 concentration_warning_count += 1
+                log_entries.append(f"WARNING: {sample_name}: {warn}")
             if conc_ng_ul is not None and conc_ng_ul > 0:
                 samples_with_conc += 1
 
-        all_samples.append((out_art, sample_name, source_well, dest_well, conc_ng_ul))
+        all_samples.append(
+            (out_art, sample_name, source_well, dest_well, conc_ng_ul, conc_source)
+        )
 
     # Check if no samples have concentration and no blanket factor is set
     if total_samples > 0 and samples_with_conc == 0 and blanket_df is None:
-        sys.exit(
-            "ERROR: No samples in this project have usable concentration and "
+        fail(
+            "No samples in this project have usable concentration and "
             "'Blanket Dilution Factor' is not set. "
             "Please set 'Blanket Dilution Factor' and check "
             "'Force Blanket Dilution' to 'Yes' in the LIMS step."
         )
 
     # Second pass: calculate volumes
-    for out_art, sample_name, source_well, dest_well, conc_ng_ul in all_samples:
+    for (
+        out_art,
+        sample_name,
+        source_well,
+        dest_well,
+        conc_ng_ul,
+        conc_source,
+    ) in all_samples:
         sample_vol, eb_vol, dilution_factor, used_default_df = calculate_volumes(
             conc_ng_ul, target_conc, blanket_df, force_blanket
         )
@@ -295,8 +348,25 @@ def main(lims, args):
         if used_default_df:
             samples_with_default_df.append(sample_name)
 
-        out_art.udf["FA Dilution Fold"] = dilution_factor
-        out_art.put()
+        try:
+            out_art.udf["FA Dilution Fold"] = dilution_factor
+            out_art.put()
+        except Exception as e:
+            fail(f"Could not save FA Dilution Fold for '{sample_name}': {e}")
+
+        if force_blanket or (
+            (conc_ng_ul is None or conc_ng_ul <= 0) and blanket_df is not None
+        ):
+            conc_source = f"blanket factor {blanket_df}"
+        elif used_default_df:
+            conc_source = "default minimum dilution factor 1:5"
+        else:
+            conc_source = f"{conc_source}: {conc_ng_ul} ng/uL"
+        log_entries.append(
+            f"{sample_name}: source well {source_well}; destination well {dest_well}; "
+            f"{conc_source}; dilution factor {dilution_factor}; sample {sample_vol} uL; "
+            f"EB {eb_vol} uL"
+        )
 
         rows.append((sample_name, source_well, sample_vol, eb_vol, dest_well))
 
@@ -316,22 +386,35 @@ def main(lims, args):
     if instrument == "fatboy":
         # Ladder in well 12 of the last sample row, or the next available row.
         if rows:
-            ladder_well = get_fatboy_ladder_well(rows)
+            try:
+                ladder_well = get_fatboy_ladder_well(rows)
+            except SystemExit as e:
+                fail(str(e))
             rows.append(("ladder", "", "N/A", "N/A", ladder_well))
+            log_entries.append(f"Ladder well: {ladder_well}")
     elif instrument == "fergie":
         # Ladder always in H12
         rows.append(("ladder", "", "N/A", "N/A", "H12"))
+        log_entries.append("Ladder well: H12")
 
     # --- Write CSV ---
-    filename = f"frag_an_driver_{instrument}.csv"
-    with open(filename, "w") as f:
-        f.write(
-            "Sample Name,Source Well,Sample Volume (uL),EB Volume (uL),Destination Well\n"
-        )
-        for row in rows:
-            f.write(f"{row[0]},{row[1]},{row[2]},{row[3]},{row[4]}\n")
+    filename = f"biomek_driver_file_for_frag_an_{instrument}.csv"
+    try:
+        with open(filename, "w") as f:
+            f.write(
+                "Sample Name,Source Well,Sample Volume (uL),EB Volume (uL),Destination Well\n"
+            )
+            for row in rows:
+                f.write(f"{row[0]},{row[1]},{row[2]},{row[3]},{row[4]}\n")
 
-    lims.upload_new_file(driver_file_out, filename)
+        lims.upload_new_file(biomek_driver_file_out, filename)
+    except Exception as e:
+        fail(f"Could not write or upload Biomek driver file: {e}")
+    log_entries.append(f"Generated and uploaded driver file: {filename}")
+
+    for warning in warnings:
+        log_entries.append(warning)
+    upload_run_log(lims, biomek_driver_log_out, currentStep.id, log_entries)
 
     if warnings:
         sys.stderr.write("\n".join(warnings) + "\n")
