@@ -8,6 +8,10 @@ Add a standalone Biomek Fragment Analyzer driver file generator
 
 Upload per-sample calculation details to the Biomek Driver Log output
 
+## 20261104.5
+
+Enforce a maximum 180 uL volume per Biomek destination well
+
 ## 20261104.2
 
 Read instrument from the step's LIMS instrument in frag_an_driver_gen

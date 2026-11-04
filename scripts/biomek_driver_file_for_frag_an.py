@@ -35,6 +35,7 @@ DEFAULT_ANALYSIS_TYPE = "Smear Analysis"
 MIN_DILUTION_FACTOR = 5.0  # Always at least 1:5 dilution
 MIN_SAMPLE_VOL = 2.5  # Minimum sample volume (uL)
 TARGET_TOTAL_VOL = 10.0  # Starting target for total volume (uL)
+MAX_TOTAL_VOL = 180.0  # Maximum volume per destination well (uL)
 PLATE_ROWS = "ABCDEFGH"
 
 
@@ -193,6 +194,11 @@ def calculate_volumes(conc_ng_ul, target_conc, blanket_df=None, force_blanket=Fa
         sample_vol = MIN_SAMPLE_VOL
 
     total_vol = sample_vol * df
+    if total_vol > MAX_TOTAL_VOL:
+        raise ValueError(
+            f"Required total volume {total_vol:g} uL exceeds the plate well limit "
+            f"of {MAX_TOTAL_VOL:g} uL."
+        )
     eb_vol = total_vol - sample_vol
     return round(sample_vol, 2), round(eb_vol, 2), round(df, 4), used_default_df
 
@@ -227,6 +233,7 @@ def main(lims, args):
         sys.exit("ERROR: No 'Biomek Driver Log' output artifact found in this step.")
 
     log_entries = [f"Step: {currentStep.id}"]
+    log_entries.append(f"Maximum total volume per well: {MAX_TOTAL_VOL:g} uL")
 
     def fail(message):
         log_entries.append(f"ERROR: {message}")
@@ -332,7 +339,8 @@ def main(lims, args):
             "'Force Blanket Dilution' to 'Yes' in the LIMS step."
         )
 
-    # Second pass: calculate volumes
+    # Validate all volumes before updating any output artifacts.
+    calculated_samples = []
     for (
         out_art,
         sample_name,
@@ -341,10 +349,40 @@ def main(lims, args):
         conc_ng_ul,
         conc_source,
     ) in all_samples:
-        sample_vol, eb_vol, dilution_factor, used_default_df = calculate_volumes(
-            conc_ng_ul, target_conc, blanket_df, force_blanket
+        try:
+            sample_vol, eb_vol, dilution_factor, used_default_df = calculate_volumes(
+                conc_ng_ul, target_conc, blanket_df, force_blanket
+            )
+        except ValueError as e:
+            fail(f"Cannot calculate dilution for '{sample_name}': {e}")
+        calculated_samples.append(
+            (
+                out_art,
+                sample_name,
+                source_well,
+                dest_well,
+                conc_ng_ul,
+                conc_source,
+                sample_vol,
+                eb_vol,
+                dilution_factor,
+                used_default_df,
+            )
         )
 
+    # Save the calculated dilution folds and construct the driver rows.
+    for (
+        out_art,
+        sample_name,
+        source_well,
+        dest_well,
+        conc_ng_ul,
+        conc_source,
+        sample_vol,
+        eb_vol,
+        dilution_factor,
+        used_default_df,
+    ) in calculated_samples:
         if used_default_df:
             samples_with_default_df.append(sample_name)
 
