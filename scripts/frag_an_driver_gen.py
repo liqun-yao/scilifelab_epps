@@ -266,11 +266,14 @@ def main(lims, args):
         dest_well = out_art.location[1].replace(":", "")
         total_samples += 1
 
-        conc_ng_ul, warn = get_concentration(inp_art)
-        if warn:
-            concentration_warning_count += 1
-        if conc_ng_ul is not None and conc_ng_ul > 0:
-            samples_with_conc += 1
+        if force_blanket:
+            conc_ng_ul = None
+        else:
+            conc_ng_ul, warn = get_concentration(inp_art)
+            if warn:
+                concentration_warning_count += 1
+            if conc_ng_ul is not None and conc_ng_ul > 0:
+                samples_with_conc += 1
 
         all_samples.append((out_art, sample_name, source_well, dest_well, conc_ng_ul))
 
