@@ -390,11 +390,11 @@ def main(lims, args):
                 ladder_well = get_fatboy_ladder_well(rows)
             except SystemExit as e:
                 fail(str(e))
-            rows.append(("ladder", "", "N/A", "N/A", ladder_well))
+            rows.append(("ladder", "", "", "", ladder_well))
             log_entries.append(f"Ladder well: {ladder_well}")
     elif instrument == "fergie":
         # Ladder always in H12
-        rows.append(("ladder", "", "N/A", "N/A", "H12"))
+        rows.append(("ladder", "", "", "", "H12"))
         log_entries.append("Ladder well: H12")
 
     # --- Write CSV ---
