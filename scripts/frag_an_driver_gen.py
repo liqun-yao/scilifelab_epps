@@ -14,8 +14,8 @@ Per-sample dilution volumes are calculated from prior quantification (Qubit /
 Quant-IT) stored on the input artifacts.  If no concentration is available, a
 blanket dilution factor set on the step UDF is used instead.
 
-Required step UDFs:
-  - Instrument Used               : must contain 'Fatboy' or 'Fergie'
+Required:
+  - Step instrument (LIMS)        : name must contain 'Fatboy' or 'Fergie'
 Optional step UDFs:
   - Analysis Type                 : Smear Analysis (default) | Single Peak
   - Blanket Dilution Factor       : numeric, used when no concentration is found
@@ -190,19 +190,18 @@ def main(lims, args):
     currentStep = Process(lims, id=args.pid)
 
     # --- Required: instrument name ---
-    try:
-        instrument_udf = currentStep.udf["Instrument Used"]
-    except KeyError:
-        sys.exit("ERROR: 'Instrument Used' UDF is not set on the step.")
+    if currentStep.instrument is None:
+        sys.exit("ERROR: No instrument is selected on the step.")
+    instrument_name = currentStep.instrument.name
 
-    if "Fatboy" in instrument_udf:
+    if "fatboy" in instrument_name.lower():
         instrument = "fatboy"
-    elif "Fergie" in instrument_udf:
+    elif "fergie" in instrument_name.lower():
         instrument = "fergie"
     else:
         sys.exit(
-            f"ERROR: Could not determine instrument from 'Instrument Used' value: "
-            f"'{instrument_udf}'. Expected a value containing 'Fatboy' or 'Fergie'."
+            f"ERROR: Could not determine instrument from step instrument "
+            f"'{instrument_name}'. Expected a name containing 'Fatboy' or 'Fergie'."
         )
 
     # --- Optional: analysis type (dropdown) ---

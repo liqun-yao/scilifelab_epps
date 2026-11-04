@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20261104.2
+
+Read instrument from the step's LIMS instrument in frag_an_driver_gen
+
 ## 20261104.1
 
 Increase minimum sample volume in frag_an_driver_gen to 2.5 uL
