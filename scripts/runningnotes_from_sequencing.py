@@ -44,6 +44,8 @@ def main(args):
         instrument_type = "NextSeq"
     elif pro.type.name == "Load to Flowcell (NovaSeqXPlus) v1.0":
         instrument_type = "NovaSeqXPlus"
+    elif pro.type.name == "Load to Flowcell (MiSeq i100) v1.0":
+        instrument_type = "MiSeq i100"
 
     for name, value in pro.udf.items():
         pro_udfs[name] = value
@@ -53,6 +55,8 @@ def main(args):
         inst = pro_udfs["Instrument"]
     elif instrument_type == "NovaSeqXPlus":
         inst = f"{pro_udfs['Instrument']} {pro_udfs['Side']}"
+    elif instrument_type == "MiSeq i100":
+        inst = pro.instrument.name
 
     date_started = datetime.datetime.fromisoformat(pro.step.date_started).date()
 
@@ -99,6 +103,10 @@ def main(args):
     elif instrument_type == "NovaSeqXPlus":
         container_name = an_analyte_container.name
         container_type = an_analyte_container.type.name
+    elif instrument_type == "MiSeq i100":
+        container_name = pro_udfs["Flowcell Series Number"]
+        container_type = pro_udfs["Run Mode"]
+
     for well, pool_artifact in an_analyte_container.placements.items():
         if pool_artifact.id in pools:
             pools[pool_artifact.id]["lane"] = well.split(":")[0]
@@ -117,13 +125,17 @@ def main(args):
                 pool_text += f"Pool '{pool['pool_name']}', {pool['Loading Conc. (pM)']}pM, {pool['% phiX']}% PhiX, \n"
             elif instrument_type == "NovaSeqXPlus":
                 pool_text += f"Pool '{pool['pool_name']}' in lane {pool['lane']}, {pool['Loading Conc. (pM)']}pM, {pool['% phiX']}% PhiX, \n"
+            elif instrument_type == "MiSeq i100":
+                pool_text += f"Pool '{pool['pool_name']}', {pool['Loading Conc. (pM)']}pM, {pool['% phiX']}% PhiX, \n"
+
+        general_comments_text = "\n".join(general_comments)
         note = (
             f"Comment from {pro.type.name} ([LIMS]({BASEURI}/clarity/work-details/{pro.id.split('-')[1]})) : \n"
             f"**Sequencing started {date_started} ** by {pro.technician.name}\n"
             f"{pool_text}"
             f"{container_type} FC={container_name}, on {inst}, {seq_setup} \n"
             f"{project_comments} \n"
-            f"{'/n'.join(general_comments)} \n"
+            f"{general_comments_text} \n"
             f"/{epp_initiator.name}"
         )
         note_obj = {

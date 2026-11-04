@@ -88,6 +88,18 @@ def calculate_fmol_AND_ng(art, result_udf):
             logging.info(f"Updated {supplemented_udf} to {supplemented_amount}.")
 
 
+def clamp_negative_concentrations(artifacts):
+    """Set negative concentration values to 0 and update in LIMS."""
+    for artifact in artifacts:
+        if artifact.udf.get("Concentration", 0) < 0:
+            logging.warning(
+                f"Negative concentration ({artifact.udf['Concentration']}) found for "
+                f"sample {artifact.samples[0].name}. Setting to 0."
+            )
+            artifact.udf["Concentration"] = 0
+            artifact.put()
+
+
 def check_udf_is_defined(artifacts, udf):
     """Filter and Warn if udf is not defined for any of artifacts."""
     filtered_artifacts = []
@@ -156,6 +168,7 @@ def main(lims, args, epp_logger):
     )
 
     if correct_artifacts:
+        clamp_negative_concentrations(correct_artifacts)
         apply_calculations(
             correct_artifacts, udf_factor1, "*", udf_factor2, unit_amount_map, p
         )

@@ -8,6 +8,82 @@ Read instrument from the step's LIMS instrument in frag_an_driver_gen
 
 Increase minimum sample volume in frag_an_driver_gen to 2.5 uL
 
+## 20261006.1
+
+Fix to support flag-only Aggregate QC workflows and update logbook PCR mappings.
+
+## 20260930.1
+
+Add functions to project validator
+
+## 20260928.1
+
+Add MiSeq i100 to automatic runnning note generation in sequencing.
+
+## 20260925.1
+
+Update logbook PCR Cycler fallback, add Visium HD3 steps for logbook and RN, remove logbook.py.
+
+## 20260923.1
+
+Watchmaker workflow updates, running-notes mapping, and logbook config changes.
+
+## 20260916.1
+
+Add MiSeq i100 logbook mapping updates and fix EPP logger stream compatibility by implementing StreamToLogger.flush.
+
+## 20260902.1
+
+Refactor zebra_barcodes script and update the CUPS server it uses.
+
+## 20260826.1
+
+Clamp negative concentration UDF values to 0 before amount calculation in qc_amount_calculation.py, logging a warning for each affected sample.
+
+## 20260813.1
+
+Added Illumina Trupath flowcells (C2 and C8) to the list of valid flowcells and give it a preliminary minimal yield requirement of 800M reads per lane (based on Illuminas specs).
+
+## 20260727.1
+
+Fix demux stats noIndex flag leaking across lanes and readscount deduplication with artifact ID tiebreaker and lane correction detection.
+
+## 20260724.1
+
+Fixing FA attachment files and handling decimal range values due to the FA software version update.
+
+## 20260722.1
+
+Add the step Aggregate QC (CytAssist) to the categories list.
+
+## 20260703.2
+
+Add expected clusters for 5B chemistry
+
+## 20260703.1
+
+Add 5B to valid chemistries
+
+## 20260702.1
+
+Move conditions that are not dependent on process outputs out of loop looping through said outputs in samplesheet generator
+
+## 20260609.1
+
+Fix ONT workflow: migrate ont_read_stats.py to IBM Cloudant v1 API and fix ONT reads aggregation in readscount.py
+
+## 20260601.1
+
+Fix bug in line splitting
+
+## 20260527.2
+
+Upgrade actions versions ahead of node.js 20 deprecation
+
+## 20260527.1
+
+Add comprehensive ONT barcode support across scripts
+
 ## 20260521.1
 
 Add NextSeq Load to Flowcell to runningnotes_from_sequencing
@@ -27,6 +103,10 @@ Bug fix for + symbol in miseq flowcell id and add several lims steps for comment
 ## 20260320.1
 
 Fix: Add Miseq i100 for readcount and generate a correct FA driver file for pools.
+
+## 20260219.1
+
+Update sample_generator to upload samplesheets to a genomics-status api
 
 ## 20260211.1
 

@@ -110,12 +110,15 @@ lims_process_record = {
     "Capture And Wash (SS XT) 4.0": {
         "lims_instrument": {"dest_file": "Bravo", "details": ["Processname"]}
     },
+    "cDNA Amplification and Clean-up (Visium HD 3) v1.0": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
     "CytAssist Probe release and Extension": {
         "lims_instrument": {"dest_file": "CytAssist", "details": ["Processname"]},
-        "udf_PCR Machine": {"dest_file": "PCR"},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Decrosslinking and/or Destaining": {
-        "lims_instrument": {"dest_file": "PCR"},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
     },
     "Denature, Dilute and Load Sample (MiSeq) 4.0": {
         "udf_Instrument Used": {
@@ -124,7 +127,10 @@ lims_process_record = {
         }
     },
     "Deparafinization, H&E, Tissue Imaging": {
-        "lims_instrument": {"dest_file": "PCR"},
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
+    "Destaining, Cytassist Enabled PolyA capture RT and Denaturation(Visium HD 3) v1.0": {
+        "lims_instrument": {"dest_file": "CytAssist", "details": ["Processname"]},
     },
     "Diluting Samples": {
         "lims_instrument": {
@@ -195,6 +201,9 @@ lims_process_record = {
     "Fragmentation & cDNA synthesis (TruSeq RNA) 4.0": {
         "udf_PCR Machine": {"dest_file": "PCR"}
     },
+    "Fragmentation, Ligation, Index PCR and Double Size Selection (Visium HD 3) v1.0": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
     "g-Tube Fragmentation": {
         "lims_instrument": {
             "dest_file": "Qubit",
@@ -215,6 +224,17 @@ lims_process_record = {
             "details": ["Assay", "Lot no: Qubit kit"],
         }
     },
+    "General QC step v1.0": {
+        "lims_instrument": {
+            "dest_file": ["Bioanalyzer", "FragmentAnalyzer"],
+            "details": [
+                "Lot no: Chip",
+                "Lot no: Reagent kit",
+                "Lot no: Ladder",
+                "Lot no: Fragment Analyzer Reagents",
+            ],
+        }
+    },
     "Hybridize Library  (SS XT) 4.0": {
         "lims_instrument": {"dest_file": "PCR"},
         "udf_Instrument Used": {"dest_file": "Bravo", "details": ["Processname"]},
@@ -228,6 +248,12 @@ lims_process_record = {
     },
     "Illumina DNA No-QC Library Pooling": {
         "lims_instrument": {"dest_file": "Mosquito", "details": ["Processname"]}
+    },
+    "Load to Flowcell (MiSeq i100) v1.0": {
+        "lims_instrument": {
+            "dest_file": "MiSeq i100",
+            "details": ["Flowcell Series Number", "Run Mode"],
+        }
     },
     "Intermediate QC": {
         "lims_instrument": {
@@ -366,7 +392,7 @@ lims_process_record = {
         },
     },
     "ONT PCR Barcoding": {
-        "lims_instrument": {
+        "udf_PCR Cycler": {
             "dest_file": "PCR",
         },
         "udf_Fragment Analyzer": {
@@ -416,6 +442,15 @@ lims_process_record = {
             "dest_file": ["Bravo", "Mosquito"],
             "details": ["Processname"],
         }
+    },
+    "Probe Elution and Pre-Amplification Clean-up": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
+    "Probe Hybridization and Ligation": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
+    "Probe-based Library Construction": {
+        "lims_instrument": {"dest_file": "PCR"},
     },
     "Pre-Pooling (AVITI) v1.0": {
         "lims_instrument": {
@@ -527,6 +562,9 @@ lims_process_record = {
         "lims_instrument": {"dest_file": "Bravo", "details": ["Processname"]},
         "udf_PCR Machine": {"dest_file": "PCR"},
     },
+    "Second Strand Synthesis and Elution (Visium HD 3) v1.0": {
+        "udf_PCR Cycler": {"dest_file": "PCR"},
+    },
     "Selection, cDNA Synthesis and Library Construction": {
         "lims_instrument": {
             "dest_file": ["Bravo", "Biomek"],
@@ -572,6 +610,12 @@ lims_process_record = {
     "Volume Measurement QC": {
         "lims_instrument": {"dest_file": "VC100"},
     },
+    "Watchmaker mRNA Library Prep (Biomek i7) v1.0": {
+        "lims_instrument": {
+            "dest_file": ["Biomek"],
+            "details": ["Processname"],
+        }
+    },
 }
 
 # A full list of GDoc electronic logooks of instruments
@@ -586,6 +630,7 @@ GDoc_logbook = {
     "CytAssist": {"File": "1sV0qefMAixVlnxGzB2q-YfcSl8a5Y69mAl555KfhU7Q"},
     "FragmentAnalyzer": {"File": "1T4Cy3ywZvl0-kQR-QbtXzu_sErPaYymXeGMf81fqK8k"},
     "MiSeq": {"File": "1ThnEbahwm3InlF_tUJ0riyT3RImVKQINfMD4rB6VThU"},
+    "MiSeq i100": {"File": "1Agbzg8M7U7HbMKCZr_LfL8XmENO5frnrTFz5TLxVxIg"},
     "Mosquito": {"File": "1ssFoSdcWV-CRK5TR--hObNkM42zJ8X3ED5q_YmU-m_o"},
     "PCR": {"File": "1YE_M4ywhr5HuQEV2DhO0oVLDPRkThhuAytAEawcdTZM"},
     "Pippin": {"File": "1cJd2Wo9GMVq0HjXrVahxF2o_I_LqIipAreWOXeWwObM"},

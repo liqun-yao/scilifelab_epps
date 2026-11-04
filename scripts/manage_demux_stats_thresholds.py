@@ -36,9 +36,12 @@ class Thresholds:
             "NextSeq 2000 P1",
             "NextSeq 2000 P2",
             "NextSeq 2000 P3",
+            "5B",
             "10B",
             "1.5B",
             "25B",
+            "C2",
+            "C8",
             "AVITI High",
             "AVITI Med",
             "AVITI Low",
@@ -54,7 +57,7 @@ class Thresholds:
         ):
             self.problem_handler(
                 "exit",
-                "Detected instrument and chemistry combination are not classed as valid in manage_demux_stats_thresholds.py",
+                f"Detected instrument ({instrument}) and chemistry ({chemistry}) combination are not classed as valid in manage_demux_stats_thresholds.py",
             )
         else:
             self.instrument = instrument
@@ -164,12 +167,19 @@ class Thresholds:
             elif self.chemistry == "S4":
                 self.exp_lane_clust = 2000e6
         elif self.instrument == "NovaSeqXPlus":
-            if self.chemistry == "10B":
+            if self.chemistry == "5B":
+                self.exp_lane_clust = 600e6
+            elif self.chemistry == "10B":
                 self.exp_lane_clust = 1200e6
             elif self.chemistry == "1.5B":
                 self.exp_lane_clust = 750e6
             elif self.chemistry == "25B":
                 self.exp_lane_clust = 3000e6
+            # Preliminary value for TruPath chemistry
+            elif self.chemistry == "C2":
+                self.exp_lane_clust = 800e6
+            elif self.chemistry == "C8":
+                self.exp_lane_clust = 800e6
         # Preliminary values for MiSeqi100
         elif self.instrument == "MiSeqi100":
             if self.chemistry == "5M":

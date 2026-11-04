@@ -22,6 +22,7 @@ TIMESTAMP: str = dt.now().strftime("%y%m%d_%H%M%S")
 DEMULTIPLEX_STEPS = [
     "Bcl Conversion & Demultiplexing (Illumina SBS) 4.0",
     "ONT Finish Sequencing v3",
+    "ONT Finish Sequencing v2.1",
     "Bcl Conversion & Demultiplexing (AVITI) v1.0",
 ]
 SEQUENCING_STEPS = [
@@ -158,12 +159,26 @@ def sum_reads(sample, summary):
     if sample.name not in summary:
         summary[sample.name] = {}
 
-    # Look for artifacts matching the sample name and expected analyte name in the demultiplexing processeses
-    demux_arts = lims.get_artifacts(
-        sample_name=sample.name,
-        process_type=DEMULTIPLEX_STEPS,
-        name=f"{sample.name} (FASTQ reads)",
-    )
+    # Look for artifacts matching the sample name in the demultiplexing processes.
+    # ONT demux artifacts are named "{sample} (FASTQ reads) {barcode}" so the exact-match
+    # name filter cannot be used; query without name and filter by substring instead.
+    ont_steps = [s for s in DEMULTIPLEX_STEPS if s.startswith("ONT")]
+    non_ont_steps = [s for s in DEMULTIPLEX_STEPS if not s.startswith("ONT")]
+
+    demux_arts = []
+    if non_ont_steps:
+        demux_arts += lims.get_artifacts(
+            sample_name=sample.name,
+            process_type=non_ont_steps,
+            name=f"{sample.name} (FASTQ reads)",
+        )
+    if ont_steps:
+        ont_arts = lims.get_artifacts(
+            sample_name=sample.name,
+            process_type=ont_steps,
+        )
+        demux_arts += [art for art in ont_arts if "(FASTQ reads)" in art.name]
+
     if not demux_arts:
         if sample_has_status(sample, "Aborted"):
             logging.info(
@@ -174,11 +189,61 @@ def sum_reads(sample, summary):
                 f"Could not find any demultiplexing artifacts for sample {sample.name}."
             )
 
-    # Check for any ongoing demux steps
+    # Iterate across found demux artifacts to aggregate reads and collect flowcell information
+    # Check for ongoing demux steps and deduplicate by flowcell+lane, keeping only the latest demux step
     ongoing_demux_arts = []
+    demux_arts_deduplicated = {}  # key: (flowcell_id, lane), value: (demux_artifact, demux_art_parent)
     for demux_art in demux_arts:
         if demux_art.parent_process.date_run is None:
             ongoing_demux_arts.append(demux_art)
+        # Get flowcell and lane identifiers early for deduplication
+        demux_art_parents = [
+            parent
+            for parent in get_parent_inputs(demux_art)
+            if sample.id in [parent_sample.id for parent_sample in parent.samples]
+        ]
+        if not demux_art_parents or len(demux_art_parents) != 1:
+            continue
+        demux_art_parent = demux_art_parents[0]
+
+        # Determine flowcell key
+        if "ONT flow cell ID" in demux_art_parent.udf:
+            flowcell_key = (demux_art_parent.udf["ONT flow cell ID"], "ONT")
+        else:
+            flowcell_key = (
+                demux_art_parent.location[0].name,
+                demux_art_parent.location[1].split(":")[0],
+            )
+
+        # Keep only the latest by date_run, with artifact ID as tiebreaker
+        if flowcell_key not in demux_arts_deduplicated:
+            demux_arts_deduplicated[flowcell_key] = (demux_art, demux_art_parent)
+        else:
+            existing_art, _ = demux_arts_deduplicated[flowcell_key]
+            # Compare date_run: newer (later date) wins
+            existing_date = existing_art.parent_process.date_run
+            new_date = demux_art.parent_process.date_run
+
+            # Extract numeric ID for tiebreaker (e.g., "92-7405142" -> 7405142)
+            existing_id_num = int(existing_art.id.split("-")[1])
+            new_id_num = int(demux_art.id.split("-")[1])
+
+            if (
+                new_date is not None
+                and (existing_date is None or new_date > existing_date)
+            ) or (new_date == existing_date and new_id_num > existing_id_num):
+                # Same date: use higher artifact ID (created more recently)
+                logging.info(
+                    f"Found newer demux artifact for flowcell {flowcell_key}: "
+                    f"replacing {existing_art.id} ({existing_date}) with {demux_art.id} ({new_date})"
+                )
+                demux_arts_deduplicated[flowcell_key] = (demux_art, demux_art_parent)
+            else:
+                logging.info(
+                    f"Skipping older demux artifact {demux_art.id} ({new_date}), "
+                    f"keeping {existing_art.id} ({existing_date})"
+                )
+
     if ongoing_demux_arts:
         ongoing_demux_steps_str = ", ".join(
             [
@@ -191,10 +256,41 @@ def sum_reads(sample, summary):
             + f" {ongoing_demux_steps_str}. Finish them before proceeding."
         )
 
-    # Iterate across found demux artifacts to aggregate reads and collect flowcell information
+    logging.info(
+        f"Deduplicated {len(demux_arts)} artifacts to {len(demux_arts_deduplicated)} "
+        f"(keeping only latest per flowcell+lane)"
+    )
+
+    # Check for lane corrections (sample moved between lanes in different demux steps of same flowcell)
+    flowcell_to_demux_steps = {}  # key: flowcell_id, value: {demux_step_id: set(lanes)}
+    for (flowcell_id, lane), (demux_art, _) in demux_arts_deduplicated.items():
+        if flowcell_id not in flowcell_to_demux_steps:
+            flowcell_to_demux_steps[flowcell_id] = {}
+        demux_step_id = demux_art.parent_process.id
+        if demux_step_id not in flowcell_to_demux_steps[flowcell_id]:
+            flowcell_to_demux_steps[flowcell_id][demux_step_id] = set()
+        flowcell_to_demux_steps[flowcell_id][demux_step_id].add(lane)
+
+    for flowcell_id, demux_steps in flowcell_to_demux_steps.items():
+        if len(demux_steps) > 1 and "ONT" not in str(
+            demux_steps
+        ):  # Multiple demux steps
+            all_lanes_across_steps = [lanes for lanes in demux_steps.values()]
+            if len(all_lanes_across_steps) > 1:
+                lanes_step1 = all_lanes_across_steps[0]
+                lanes_step2 = all_lanes_across_steps[1]
+                if lanes_step1 != lanes_step2:
+                    raise ValueError(
+                        f"ERROR: Sample '{sample.name}' appears in different lanes "
+                        f"across demux steps of flowcell '{flowcell_id}': "
+                        f"{dict(demux_steps)}. "
+                        f"This indicates a lane correction in LIMS. "
+                        f"Please verify the values and correct them manually if needed."
+                    )
+
     tot_reads = 0
     flowcell_lane_list = []
-    for demux_art in demux_arts:
+    for demux_art, demux_art_parent in demux_arts_deduplicated.values():
         logging.info(
             f"Looking at '{demux_art.name}' ({demux_art.id}) of step"
             + f" '{demux_art.parent_process.type.name}'"
@@ -218,15 +314,6 @@ def sum_reads(sample, summary):
             continue
 
         assert demux_art.udf["Include reads"] == "YES"
-
-        # Track down the sequencing process upstream of the demux artifact
-        demux_art_parents = [
-            parent
-            for parent in get_parent_inputs(demux_art)
-            if sample.id in [parent_sample.id for parent_sample in parent.samples]
-        ]
-        assert len(demux_art_parents) == 1
-        demux_art_parent = demux_art_parents[0]
 
         # Two cases to consider:
         if demux_art_parent.parent_process.type.name in SEQUENCING_STEPS:

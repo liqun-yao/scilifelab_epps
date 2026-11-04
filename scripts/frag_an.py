@@ -14,7 +14,7 @@ DESC = """EPP diluting the concentration of samples in the fragment analyzer ste
 def parse_range_bp(range_value):
     bp_values = re.findall(r"\d+(?:\.\d+)?", range_value)
     if len(bp_values) < 2:
-        raise ValueError("Could not parse Range value '{}'".format(range_value))
+        raise ValueError(f"Could not parse Range value '{range_value}'")
     return int(round(float(bp_values[0]))), int(round(float(bp_values[1])))
 
 
@@ -72,22 +72,20 @@ def main(lims, args):
                         dilution_fold = float(sample.udf["FA Dilution Fold"])
                     except KeyError:
                         log.append(
-                            "No artifact- or sample-level FA Dilution Fold found "
-                            "for {}. Using Fragment Analyzer concentration without "
-                            "correction.".format(sample.name)
+                            f"No artifact- or sample-level FA Dilution Fold found "
+                            f"for {sample.name}. Using Fragment Analyzer concentration without "
+                            "correction."
                         )
                     except Exception as e:
                         log.append(
-                            "Could not read sample-level FA Dilution Fold for {}: "
-                            "{}. Using Fragment Analyzer concentration without "
-                            "correction.".format(sample.name, e)
+                            f"Could not read sample-level FA Dilution Fold for {sample.name}: "
+                            f"{e}. Using Fragment Analyzer concentration without "
+                            "correction."
                         )
                 except Exception as e:
                     log.append(
-                        "Could not read artifact-level FA Dilution Fold for {}: {}. "
-                        "Using Fragment Analyzer concentration without correction.".format(
-                            sample.name, e
-                        )
+                        f"Could not read artifact-level FA Dilution Fold for {sample.name}: "
+                        f"{e}. Using Fragment Analyzer concentration without correction."
                     )
 
                 base_concentration = float(frag_data[well]["ng/uL"]) * dilution_fold
