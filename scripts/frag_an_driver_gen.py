@@ -19,7 +19,7 @@ Required step UDFs:
 Optional step UDFs:
   - Analysis Type                 : Smear Analysis (default) | Single Peak
   - Blanket Dilution Factor       : numeric, used when no concentration is found
-  - Force Blanket Dilution        : checkbox; when ticked, blanket factor is used
+  - Force Blanket Dilution        : Yes/No; when 'Yes', blanket factor is used
                                     for ALL samples, ignoring measured concentrations
 """
 
@@ -31,7 +31,7 @@ ANALYSIS_TYPES = {
 DEFAULT_ANALYSIS_TYPE = "Smear Analysis"
 
 MIN_DILUTION_FACTOR = 5.0  # Always at least 1:5 dilution
-MIN_SAMPLE_VOL = 2.0  # Minimum sample volume (uL)
+MIN_SAMPLE_VOL = 2.5  # Minimum sample volume (uL)
 TARGET_TOTAL_VOL = 10.0  # Starting target for total volume (uL)
 PLATE_ROWS = "ABCDEFGH"
 
@@ -273,9 +273,7 @@ def main(lims, args):
         if conc_ng_ul is not None and conc_ng_ul > 0:
             samples_with_conc += 1
 
-        all_samples.append(
-            (out_art, sample_name, source_well, dest_well, conc_ng_ul)
-        )
+        all_samples.append((out_art, sample_name, source_well, dest_well, conc_ng_ul))
 
     # Check if no samples have concentration and no blanket factor is set
     if total_samples > 0 and samples_with_conc == 0 and blanket_df is None:

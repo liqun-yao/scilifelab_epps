@@ -1,5 +1,9 @@
 # Scilifelab_epps Version Log
 
+## 20261104.1
+
+Increase minimum sample volume in frag_an_driver_gen to 2.5 uL
+
 ## 20260521.1
 
 Add NextSeq Load to Flowcell to runningnotes_from_sequencing
